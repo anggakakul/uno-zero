@@ -182,6 +182,85 @@ class SoundManager {
       osc.stop(now + t + d + 0.02);
     });
   }
+
+  /** Crisp safe mechanical click when UNO Attack Launcher fires 0 cards */
+  public playLauncherSafeClick(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(820, now);
+    osc.frequency.exponentialRampToValueAtTime(320, now + 0.06);
+    gain.gain.setValueAtTime(0.16, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.08);
+  }
+
+  /** Mechanical motor whirr + rapid card-burst when UNO Attack Launcher shoots cards */
+  public playLauncherBlast(cardCount: number): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const bursts = Math.min(8, Math.max(2, cardCount));
+    for (let i = 0; i < bursts; i += 1) {
+      const t = now + i * 0.045;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(160 + i * 28, t);
+      gain.gain.setValueAtTime(0.12, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.045);
+    }
+  }
+
+  /** Countdown / tension heartbeat tick for UNO Triple Play */
+  public playTriplePlayTick(urgent = false): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(urgent ? 980 : 520, now);
+    gain.gain.setValueAtTime(urgent ? 0.14 : 0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.08);
+  }
+
+  /** 2-tone electronic Overload siren for UNO Triple Play */
+  public playOverloadSiren(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [
+      { f: 640, t: 0 },
+      { f: 420, t: 0.13 },
+      { f: 640, t: 0.26 },
+    ].forEach(({ f, t }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(f, now + t);
+      gain.gain.setValueAtTime(0.14, now + t);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + t + 0.12);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + t);
+      osc.stop(now + t + 0.125);
+    });
+  }
 }
 
 export const soundFX = new SoundManager();

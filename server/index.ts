@@ -23,6 +23,7 @@ import {
   takeFromPile,
 } from '../src/engine/gameEngine';
 import { getGlobalLeaderboard, recordGlobalLeaderboard } from './leaderboardStore';
+import { registerHubRoomHandlers } from './hubRooms';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const TURN_TIMEOUT_MS = 20_000;
@@ -280,6 +281,7 @@ setInterval(() => {
 }, CLEANUP_INTERVAL_MS);
 
 io.on('connection', (socket) => {
+  registerHubRoomHandlers(io, socket);
   socket.on(
     'create_room',
     (
@@ -472,7 +474,7 @@ io.on('connection', (socket) => {
     broadcastGameState(ctx.room, true);
   });
 
-  socket.on('game_action', (payload: { type: string; [key: string]: unknown }) => {
+  socket.on('game_action', (payload: { type: string;[key: string]: unknown }) => {
     const ctx = getActiveRoomAndPlayer(socket);
     if (!ctx || !ctx.room.gameState) return;
 

@@ -69,7 +69,11 @@ type Screen =
   | 'settings'
   | 'about';
 
-export function App() {
+interface AppProps {
+  onBackToHub?: () => void;
+}
+
+export function App({ onBackToHub }: AppProps = {}) {
   const [config, setConfig] = useState<GameConfig>(() => loadSavedConfig());
   const [mode, setMode] = useState<GameMode>('local');
   const [gameState, setGameState] = useState<GameState | null>(() => loadSavedGame());
@@ -362,6 +366,7 @@ export function App() {
         onHowToPlay={() => openAuxiliaryScreen('how_to_play')}
         onSettings={() => openAuxiliaryScreen('settings')}
         onAbout={() => openAuxiliaryScreen('about')}
+        onBackToHub={onBackToHub}
       />
     );
   }
