@@ -1,59 +1,194 @@
 import { io, Socket } from 'socket.io-client';
-import { HubGameState, VariantId, VariantSettings } from '../types';
-
-const SERVER_URL =
-  (import.meta.env.VITE_ONLINE_SERVER_URL as string | undefined) ||
-  (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001');
+import { getServerBaseUrl } from '../../services/onlineClient';
+import { getOrCreateSessionId } from '../../services/session';
+import { OnlinePlayerNotice } from '../../types/game';
+import {
+  HubGameState,
+  HubOnlineAction,
+  HubOnlineRoomInfo,
+  VariantId,
+  VariantSettings,
+} from '../types';
 
 let hubSocket: Socket | null = null;
+let hubActionSeq = 0;
 
-function getHubSocket(): Socket {
+function nextHubActionId(): string {
+  hubActionSeq += 1;
+  return `ha_${Date.now().toString(36)}_${hubActionSeq}`;
+}
+
+export function getHubSocket(): Socket {
   if (!hubSocket) {
-    hubSocket = io(SERVER_URL, { autoConnect: true, reconnectionAttempts: 4 });
+    hubSocket = io(getServerBaseUrl(), {
+      autoConnect: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      transports: ['websocket', 'polling'],
+    });
   }
-  if (!hubSocket.connected) hubSocket.connect();
+  if (!hubSocket.connected) {
+    hubSocket.connect();
+  }
   return hubSocket;
+}
+
+export function leaveHubOnlineRoom(): void {
+  if (hubSocket) {
+    hubSocket.emit('hub:leave_room');
+    hubSocket.disconnect();
+    hubSocket = null;
+  }
+}
+
+export interface HubRoomActionResponse {
+  ok: boolean;
+  error?: string;
+  room?: HubOnlineRoomInfo;
+  playerId?: string;
+  gameState?: HubGameState | null;
 }
 
 export function createHubOnlineRoom(
   playerName: string,
-  variantId: VariantId,
+  variantId: Exclude<VariantId, 'uno-zero'>,
   settings: VariantSettings,
-  initialState: HubGameState
-): Promise<{ ok: boolean; code?: string; error?: string }> {
+  fillWithBots = false,
+  targetPlayerCount?: number
+): Promise<HubRoomActionResponse> {
   return new Promise((resolve) => {
     const sock = getHubSocket();
-    const timer = setTimeout(() => resolve({ ok: false, error: 'Server online tidak merespons (offline fallback aktif).' }), 2500);
-    sock.emit('hub:create_room', { playerName, variantId, settings, initialState }, (res: { ok: boolean; code?: string; error?: string }) => {
-      clearTimeout(timer);
-      resolve(res);
-    });
+    const sessionId = getOrCreateSessionId();
+    const timer = setTimeout(() => {
+      resolve({
+        ok: false,
+        error: `Gagal terhubung ke server multiplayer (${getServerBaseUrl()}). Pastikan server aktif.`,
+      });
+    }, 6000);
+
+    sock.emit(
+      'hub:create_room',
+      { playerName, sessionId, variantId, settings, fillWithBots, targetPlayerCount },
+      (res: HubRoomActionResponse) => {
+        clearTimeout(timer);
+        resolve(res);
+      }
+    );
   });
 }
 
 export function joinHubOnlineRoom(
   code: string,
   playerName: string
-): Promise<{ ok: boolean; state?: HubGameState | null; error?: string }> {
+): Promise<HubRoomActionResponse> {
   return new Promise((resolve) => {
     const sock = getHubSocket();
-    const timer = setTimeout(() => resolve({ ok: false, error: 'Server online tidak merespons.' }), 2500);
-    sock.emit('hub:join_room', { code, playerName }, (res: { ok: boolean; state?: HubGameState | null; error?: string }) => {
+    const sessionId = getOrCreateSessionId();
+    const timer = setTimeout(() => {
+      resolve({
+        ok: false,
+        error: `Gagal terhubung ke server multiplayer (${getServerBaseUrl()}). Pastikan server aktif.`,
+      });
+    }, 6000);
+
+    sock.emit(
+      'hub:join_room',
+      { code: code.trim().toUpperCase(), playerName, sessionId },
+      (res: HubRoomActionResponse) => {
+        clearTimeout(timer);
+        resolve(res);
+      }
+    );
+  });
+}
+
+export function reconnectHubOnlineRoom(code: string): Promise<HubRoomActionResponse> {
+  return new Promise((resolve) => {
+    const sock = getHubSocket();
+    const sessionId = getOrCreateSessionId();
+    const timer = setTimeout(() => resolve({ ok: false }), 4500);
+
+    sock.emit(
+      'hub:reconnect_room',
+      { code: code.trim().toUpperCase(), sessionId },
+      (res: HubRoomActionResponse) => {
+        clearTimeout(timer);
+        resolve(res);
+      }
+    );
+  });
+}
+
+export function toggleHubReady(ready?: boolean): void {
+  getHubSocket().emit('hub:toggle_ready', typeof ready === 'boolean' ? { ready } : undefined);
+}
+
+export function updateHubRoomSettings(payload: {
+  variantId?: Exclude<VariantId, 'uno-zero'>;
+  settings?: Partial<VariantSettings>;
+  fillWithBots?: boolean;
+  targetPlayerCount?: number;
+}): void {
+  getHubSocket().emit('hub:update_settings', payload);
+}
+
+export function startHubOnlineGame(): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const sock = getHubSocket();
+    const timer = setTimeout(
+      () => resolve({ ok: false, error: 'Server tidak merespons.' }),
+      5000
+    );
+    sock.emit('hub:start_game', (res: { ok: boolean; error?: string }) => {
       clearTimeout(timer);
-      resolve(res);
+      resolve(res ?? { ok: true });
     });
   });
 }
 
-export function broadcastHubState(code: string, state: HubGameState): void {
-  if (!hubSocket?.connected) return;
-  hubSocket.emit('hub:sync_state', { code, state });
+export function sendHubOnlineAction(action: HubOnlineAction): void {
+  getHubSocket().emit('hub:game_action', {
+    action,
+    actionId: nextHubActionId(),
+  });
 }
 
-export function subscribeHubState(onState: (state: HubGameState) => void): () => void {
+export function subscribeHubOnlineEvents(handlers: {
+  onRoomUpdated: (room: HubOnlineRoomInfo) => void;
+  onGameState: (state: HubGameState) => void;
+  onPlayerNotice?: (notice: OnlinePlayerNotice) => void;
+  onSocketReconnect?: () => void;
+  onConnectionChange?: (status: 'connected' | 'reconnecting' | 'disconnected') => void;
+}): () => void {
   const sock = getHubSocket();
-  sock.on('hub:state_updated', onState);
+  sock.on('hub:room_updated', handlers.onRoomUpdated);
+  sock.on('hub:game_state', handlers.onGameState);
+  if (handlers.onPlayerNotice) {
+    sock.on('hub:player_notice', handlers.onPlayerNotice);
+  }
+  const handleConnect = () => {
+    handlers.onConnectionChange?.('connected');
+    handlers.onSocketReconnect?.();
+  };
+  const handleDisconnect = () => {
+    handlers.onConnectionChange?.('reconnecting');
+  };
+  const handleConnectError = () => {
+    handlers.onConnectionChange?.('disconnected');
+  };
+  sock.on('connect', handleConnect);
+  sock.on('disconnect', handleDisconnect);
+  sock.on('connect_error', handleConnectError);
+
   return () => {
-    sock.off('hub:state_updated', onState);
+    sock.off('hub:room_updated', handlers.onRoomUpdated);
+    sock.off('hub:game_state', handlers.onGameState);
+    if (handlers.onPlayerNotice) {
+      sock.off('hub:player_notice', handlers.onPlayerNotice);
+    }
+    sock.off('connect', handleConnect);
+    sock.off('disconnect', handleDisconnect);
+    sock.off('connect_error', handleConnectError);
   };
 }

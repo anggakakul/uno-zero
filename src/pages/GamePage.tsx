@@ -15,9 +15,11 @@ import {
   Trash2,
   Volume2,
   VolumeX,
+  Wifi,
+  WifiOff,
   X,
 } from 'lucide-react';
-import { GameMode, GameState, SlotPosition } from '../types/game';
+import { GameMode, GameState, OnlinePlayerNotice, SlotPosition } from '../types/game';
 import { canTakeFromDiscardPile, countFaceDownCards, isActionCard } from '../engine/rules';
 import { soundFX } from '../services/sound';
 import { UnoCard } from '../components/UnoCard';
@@ -33,6 +35,8 @@ interface GamePageProps {
   state: GameState;
   viewerPlayerId: string | null;
   roomCode?: string | null;
+  connectionStatus?: 'connected' | 'reconnecting' | 'disconnected';
+  onlineNotice?: OnlinePlayerNotice | null;
   onFlipInitial: (colIdx: number, pos: SlotPosition) => void;
   onTakeFromPile: (source: 'draw' | 'discard') => void;
   onSwapWithSlot: (colIdx: number, pos: SlotPosition) => void;
@@ -49,6 +53,8 @@ export const GamePage: React.FC<GamePageProps> = ({
   state,
   viewerPlayerId,
   roomCode,
+  connectionStatus = 'connected',
+  onlineNotice,
   onFlipInitial,
   onTakeFromPile,
   onSwapWithSlot,
@@ -250,6 +256,28 @@ export const GamePage: React.FC<GamePageProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5">
+          {mode === 'online' && (
+            <div
+              className={`hidden sm:inline-flex items-center gap-1 px-2 py-1.5 rounded-xl border text-[11px] font-bold ${
+                connectionStatus === 'connected'
+                  ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300'
+                  : connectionStatus === 'reconnecting'
+                  ? 'bg-amber-500/20 border-amber-400/50 text-amber-200 animate-pulse'
+                  : 'bg-rose-500/20 border-rose-400/50 text-rose-200'
+              }`}
+            >
+              {connectionStatus === 'connected' ? (
+                <Wifi className="w-3.5 h-3.5" />
+              ) : (
+                <WifiOff className="w-3.5 h-3.5" />
+              )}
+              {connectionStatus === 'connected'
+                ? 'Online'
+                : connectionStatus === 'reconnecting'
+                ? 'Reconnecting...'
+                : 'Offline'}
+            </div>
+          )}
           {secondsLeft !== null && (
             <div
               className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-display font-black ${
@@ -318,6 +346,11 @@ export const GamePage: React.FC<GamePageProps> = ({
 
       {/* Center Table: Draw Pile + Discard Pile + Active Drawn Card */}
       <main className="flex-1 flex flex-col items-center justify-center px-3 py-2 gap-2.5 z-10">
+        {onlineNotice && (
+          <div className="max-w-xl w-full text-center px-4 py-1.5 rounded-xl bg-sky-500/20 border border-sky-400/50 text-xs font-bold text-sky-100">
+            🔔 {onlineNotice.message}
+          </div>
+        )}
         <div className="max-w-xl w-full flex justify-center min-h-[36px]">
           <ToastBanner event={state.lastEvent} />
         </div>

@@ -15,9 +15,12 @@ import {
   Users,
   Volume2,
   VolumeX,
+  Wifi,
+  WifiOff,
   X,
   Zap,
 } from 'lucide-react';
+import { OnlinePlayerNotice } from '../../types/game';
 import { soundFX } from '../../services/sound';
 import { getVariantMetadata } from '../catalog';
 import { DigitalToolWidgets } from '../components/DigitalToolWidgets';
@@ -73,12 +76,17 @@ import {
 } from '../rulesets/unoRummyUp';
 import { TEAM_NAMES, getPartner } from '../rulesets/unoTeams';
 import { handleTriplePlayTimeout } from '../rulesets/unoTriplePlay';
-import { HubCardColor, HubGameState, VariantId } from '../types';
+import { HubCardColor, HubGameState, HubOnlineAction, VariantId } from '../types';
 
 interface HubGamePageProps {
   state: HubGameState;
   onlineRoomCode?: string | null;
+  viewerPlayerId?: string | null;
+  isOnlineHost?: boolean;
+  connectionStatus?: 'connected' | 'reconnecting' | 'disconnected';
+  onlineNotice?: OnlinePlayerNotice | null;
   onUpdateState: (updater: (prev: HubGameState) => HubGameState) => void;
+  onOnlineAction?: (action: HubOnlineAction) => void;
   onExitToHub: () => void;
   onRestartMatch: () => void;
   onOpenGuide: () => void;
@@ -111,7 +119,12 @@ const COLOR_PILL_BG: Record<HubCardColor, string> = {
 export const HubGamePage: React.FC<HubGamePageProps> = ({
   state,
   onlineRoomCode,
+  viewerPlayerId,
+  isOnlineHost = true,
+  connectionStatus = 'connected',
+  onlineNotice,
   onUpdateState,
+  onOnlineAction,
   onExitToHub,
   onRestartMatch,
   onOpenGuide,
@@ -119,6 +132,18 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
   const variantId = state.variantId as Exclude<VariantId, 'uno-zero'>;
   const ruleset = getRuleset(variantId);
   const meta = getVariantMetadata(variantId);
+  const isOnline = state.mode === 'online';
+
+  const dispatchAction = (
+    action: HubOnlineAction,
+    localUpdater: (prev: HubGameState) => HubGameState
+  ) => {
+    if (isOnline) {
+      onOnlineAction?.(action);
+    } else {
+      onUpdateState(localUpdater);
+    }
+  };
 
   const [useFlexToggle, setUseFlexToggle] = useState(false);
   const [selectedTriplePile, setSelectedTriplePile] = useState<number | null>(null);
@@ -135,22 +160,40 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
   const [emojiStackCardId, setEmojiStackCardId] = useState<string>('');
   const [muted, setMuted] = useState(() => soundFX.isMuted());
   const [launcherShaking, setLauncherShaking] = useState(false);
+  const [onlineSecondsLeft, setOnlineSecondsLeft] = useState<number | null>(null);
 
   const currentPlayer = state.players[state.currentPlayerIndex];
-  const viewerPlayer =
-    state.mode === 'ai'
-      ? state.players.find((p) => !p.isAI) ?? state.players[0]
-      : currentPlayer;
+  const viewerPlayer = isOnline
+    ? state.players.find((p) => p.id === viewerPlayerId) ?? state.players[0]
+    : state.mode === 'ai'
+    ? state.players.find((p) => !p.isAI) ?? state.players[0]
+    : currentPlayer;
 
   const isViewerTurn =
     (state.phase === 'playing' || state.phase === 'party_pile_up') &&
     viewerPlayer &&
     currentPlayer?.id === viewerPlayer.id;
 
-  const isPromptForHuman = Boolean(
-    state.pendingPrompt &&
-      state.players.find((p) => p.id === state.pendingPrompt?.actorId && !p.isAI)
-  );
+  const isPromptForHuman = isOnline
+    ? Boolean(state.pendingPrompt && viewerPlayer && state.pendingPrompt.actorId === viewerPlayer.id)
+    : Boolean(
+        state.pendingPrompt &&
+          state.players.find((p) => p.id === state.pendingPrompt?.actorId && !p.isAI)
+      );
+
+  // Live countdown timer for server-authoritative online turn deadline
+  useEffect(() => {
+    if (!isOnline || !state.turnDeadline) {
+      setOnlineSecondsLeft(null);
+      return;
+    }
+    const tick = () => {
+      setOnlineSecondsLeft(Math.max(0, Math.ceil((state.turnDeadline! - Date.now()) / 1000)));
+    };
+    tick();
+    const id = setInterval(tick, 300);
+    return () => clearInterval(id);
+  }, [isOnline, state.turnDeadline]);
 
   // Sound FX feedback on events
   useEffect(() => {
@@ -185,8 +228,9 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
     setGolfDoubleFirst(null);
   }, [state.currentPlayerIndex, state.roundNumber]);
 
-  // AI Automation
+  // AI Automation (offline only — online AI runs authoritatively on server!)
   useEffect(() => {
+    if (isOnline) return;
     if (state.phase === 'round_over' || state.phase === 'game_over' || state.phase === 'pass_device') {
       return;
     }
@@ -235,9 +279,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
     state.actionLog.length,
   ]);
 
-  // UNO Triple Play 7-second Timer Mode countdown
+  // UNO Triple Play 7-second Timer Mode countdown (offline only — server handles online!)
   useEffect(() => {
     if (
+      isOnline ||
       state.variantId !== 'uno-triple-play' ||
       state.settings.triplePlayMode !== 'timer' ||
       state.phase !== 'playing' ||
@@ -256,8 +301,9 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
     return () => clearInterval(interval);
   }, [state.variantId, state.settings.triplePlayMode, state.phase, state.currentPlayerIndex]);
 
-  // UNO House Rules QTE AI Auto-Reaction
+  // UNO House Rules QTE AI Auto-Reaction (offline only — server handles online!)
   useEffect(() => {
+    if (isOnline) return;
     if (state.phase !== 'house_rule_qte' || !state.activeRuleQTE) return;
     const pendingAIs = state.players.filter(
       (p) => p.isAI && !state.activeRuleQTE?.completedPlayerIds.includes(p.id)
@@ -276,8 +322,9 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
     return () => clearTimeout(timer);
   }, [state.phase, state.activeRuleQTE?.completedPlayerIds.length]);
 
-  // UNO Flash Reflex Timer countdown
+  // UNO Flash Reflex Timer countdown (offline only — server handles online!)
   useEffect(() => {
+    if (isOnline) return;
     const flash = state.toolState?.flashActive;
     if (!flash || state.phase !== 'playing') return;
     const interval = setInterval(() => {
@@ -344,35 +391,35 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
     // DOS Mode: support discard_to_center stage, single match OR 2-card sum selection!
     if (state.variantId === 'dos-mode') {
       if (state.dosTurnState?.stage === 'discard_to_center') {
-        onUpdateState((prev) => ruleset.executeAction(prev, viewerPlayer.id, { cardId }));
+        dispatchAction(
+          { type: 'play_card', move: { cardId } },
+          (prev) => ruleset.executeAction(prev, viewerPlayer.id, { cardId })
+        );
         setDosSelectedFirst(null);
         return;
       }
       if (dosSelectedFirst && dosSelectedFirst !== cardId) {
-        const pairValid = ruleset.validateMove(state, viewerPlayer.id, {
+        const pairMove = {
           cardId: dosSelectedFirst,
           secondCardId: cardId,
           pileIndex: dosSelectedPile,
-        }).valid;
+        };
+        const pairValid = ruleset.validateMove(state, viewerPlayer.id, pairMove).valid;
         if (pairValid) {
-          onUpdateState((prev) =>
-            ruleset.executeAction(prev, viewerPlayer.id, {
-              cardId: dosSelectedFirst,
-              secondCardId: cardId,
-              pileIndex: dosSelectedPile,
-            })
+          dispatchAction(
+            { type: 'play_card', move: pairMove },
+            (prev) => ruleset.executeAction(prev, viewerPlayer.id, pairMove)
           );
           setDosSelectedFirst(null);
           return;
         }
       }
-      const singleValid = ruleset.validateMove(state, viewerPlayer.id, {
-        cardId,
-        pileIndex: dosSelectedPile,
-      }).valid;
+      const singleMove = { cardId, pileIndex: dosSelectedPile };
+      const singleValid = ruleset.validateMove(state, viewerPlayer.id, singleMove).valid;
       if (singleValid && !dosSelectedFirst) {
-        onUpdateState((prev) =>
-          ruleset.executeAction(prev, viewerPlayer.id, { cardId, pileIndex: dosSelectedPile })
+        dispatchAction(
+          { type: 'play_card', move: singleMove },
+          (prev) => ruleset.executeAction(prev, viewerPlayer.id, singleMove)
         );
       } else {
         setDosSelectedFirst(dosSelectedFirst === cardId ? null : cardId);
@@ -390,22 +437,22 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                 ruleset.validateMove(state, viewerPlayer.id, { cardId, pileIndex: idx }).valid
             );
       if (targetPile < 0) return;
-      onUpdateState((prev) =>
-        ruleset.executeAction(prev, viewerPlayer.id, {
-          cardId,
-          pileIndex: targetPile,
-          tippoSide,
-        })
+      const move = { cardId, pileIndex: targetPile, tippoSide };
+      dispatchAction(
+        { type: 'play_card', move },
+        (prev) => ruleset.executeAction(prev, viewerPlayer.id, move)
       );
       return;
     }
 
-    onUpdateState((prev) =>
-      ruleset.executeAction(prev, viewerPlayer.id, {
-        cardId,
-        useFlex: state.variantId === 'uno-flex' ? useFlexToggle : undefined,
-        tippoSide,
-      })
+    const move = {
+      cardId,
+      useFlex: state.variantId === 'uno-flex' ? useFlexToggle : undefined,
+      tippoSide,
+    };
+    dispatchAction(
+      { type: 'play_card', move },
+      (prev) => ruleset.executeAction(prev, viewerPlayer.id, move)
     );
   };
 
@@ -415,7 +462,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
       setLauncherShaking(true);
       setTimeout(() => setLauncherShaking(false), 500);
     }
-    onUpdateState((prev) => ruleset.handleDrawOrPass(prev, viewerPlayer.id));
+    dispatchAction(
+      { type: 'draw_or_pass' },
+      (prev) => ruleset.handleDrawOrPass(prev, viewerPlayer.id)
+    );
   };
 
   // PASS & PLAY PRIVACY SCREEN
@@ -507,14 +557,22 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
 
           <div className="flex flex-col sm:flex-row gap-2.5">
             {!isGameOver ? (
-              <button
-                type="button"
-                onClick={() => onUpdateState((prev) => ruleset.resetRound(prev))}
-                className="flex-1 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 font-display font-black text-sm cursor-pointer"
-              >
-                LANJUT RONDE {state.roundNumber + 1}
-              </button>
-            ) : (
+              isOnlineHost ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    dispatchAction({ type: 'next_round' }, (prev) => ruleset.resetRound(prev))
+                  }
+                  className="flex-1 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 font-display font-black text-sm cursor-pointer"
+                >
+                  LANJUT RONDE {state.roundNumber + 1}
+                </button>
+              ) : (
+                <div className="flex-1 py-3.5 px-4 rounded-2xl bg-slate-900 border border-slate-700 text-slate-300 text-center font-display font-bold text-xs sm:text-sm">
+                  Menunggu Host memulai Ronde {state.roundNumber + 1}...
+                </div>
+              )
+            ) : isOnlineHost ? (
               <button
                 type="button"
                 onClick={onRestartMatch}
@@ -523,6 +581,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                 <RotateCcw className="w-4 h-4" />
                 MAIN LAGI
               </button>
+            ) : (
+              <div className="flex-1 py-3.5 px-4 rounded-2xl bg-slate-900 border border-slate-700 text-slate-300 text-center font-display font-bold text-xs sm:text-sm">
+                Menunggu Host memulai ulang...
+              </div>
             )}
             <button
               type="button"
@@ -565,6 +627,40 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
               {onlineRoomCode && (
                 <span className="px-2 py-0.5 rounded-full bg-sky-500/25 border border-sky-400/50 text-sky-200 text-[10px] font-mono font-black">
                   ROOM: {onlineRoomCode}
+                </span>
+              )}
+              {isOnline && (
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    connectionStatus === 'connected'
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : connectionStatus === 'reconnecting'
+                      ? 'bg-amber-500/25 text-amber-200 animate-pulse'
+                      : 'bg-rose-500/25 text-rose-200'
+                  }`}
+                >
+                  {connectionStatus === 'connected' ? (
+                    <Wifi className="w-3 h-3" />
+                  ) : (
+                    <WifiOff className="w-3 h-3" />
+                  )}
+                  {connectionStatus === 'connected'
+                    ? 'Online'
+                    : connectionStatus === 'reconnecting'
+                    ? 'Reconnecting...'
+                    : 'Offline'}
+                </span>
+              )}
+              {isOnline && onlineSecondsLeft !== null && (
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black ${
+                    onlineSecondsLeft <= 5
+                      ? 'bg-rose-500/30 text-rose-200 animate-pulse'
+                      : 'bg-slate-800 text-amber-300'
+                  }`}
+                >
+                  <Clock className="w-3 h-3" />
+                  {onlineSecondsLeft}s
                 </span>
               )}
               {state.variantId === 'uno-flip' && (
@@ -624,9 +720,22 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
               >
                 <div>
                   <div className="flex items-center gap-1.5">
+                    {isOnline && !p.isAI && (
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${
+                          p.connected === false ? 'bg-rose-500 animate-pulse' : 'bg-emerald-400'
+                        }`}
+                        title={p.connected === false ? 'Terputus' : 'Online'}
+                      />
+                    )}
                     <span className="font-display font-bold text-xs sm:text-sm text-white">
                       {p.name}
                     </span>
+                    {isOnline && p.connected === false && (
+                      <span className="px-1.5 py-0.5 rounded bg-rose-500/30 text-rose-200 text-[9px] font-black">
+                        OFFLINE
+                      </span>
+                    )}
                     {isPartner && (
                       <span className="px-1.5 py-0.5 rounded bg-sky-500/30 text-sky-200 text-[9px] font-black">
                         REKAN
@@ -677,6 +786,16 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
 
       {/* Center Table Arena */}
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-3 gap-3.5">
+        {onlineNotice && (
+          <div className="max-w-xl w-full text-center px-4 py-2 rounded-2xl bg-sky-500/20 border border-sky-400/50 text-xs font-bold text-sky-100 shadow-lg">
+            🔔 {onlineNotice.message}
+          </div>
+        )}
+        {isOnline && state.pendingPrompt && !isPromptForHuman && (
+          <div className="max-w-xl w-full text-center px-4 py-2 rounded-2xl bg-amber-500/15 border border-amber-400/40 text-xs font-bold text-amber-200">
+            ⏳ Menunggu {state.players.find((p) => p.id === state.pendingPrompt?.actorId)?.name ?? 'pemain'} menyelesaikan aksi...
+          </div>
+        )}
         {/* Event Toast */}
         <AnimatePresence mode="wait">
           {state.lastEvent && (
@@ -699,14 +818,19 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
           onChangeTippoSide={setTippoSide}
           onPressFlashReflex={() => {
             if (state.toolState?.flashActive) {
-              onUpdateState((prev) =>
-                resolveFlashReflex(prev, state.toolState!.flashActive!.targetPlayerId, true)
+              dispatchAction(
+                { type: 'tool_flash_reflex' },
+                (prev) =>
+                  resolveFlashReflex(prev, state.toolState!.flashActive!.targetPlayerId, true)
               );
             }
           }}
           onTriggerOvercharge={(level) => {
             if (viewerPlayer && isViewerTurn) {
-              onUpdateState((prev) => triggerOverchargeBlast(prev, viewerPlayer.id, level));
+              dispatchAction(
+                { type: 'tool_overcharge_blast', level },
+                (prev) => triggerOverchargeBlast(prev, viewerPlayer.id, level)
+              );
             }
           }}
         />
@@ -759,7 +883,12 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                   {ready && isViewerTurn && (
                     <button
                       type="button"
-                      onClick={() => onUpdateState((prev) => triggerComebackUnoCombo(prev, viewerPlayer.id))}
+                      onClick={() =>
+                        dispatchAction(
+                          { type: 'pack_comeback_uno_combo' },
+                          (prev) => triggerComebackUnoCombo(prev, viewerPlayer.id)
+                        )
+                      }
                       className="ml-1 px-2.5 py-0.5 rounded-xl bg-gradient-to-r from-amber-300 to-orange-500 text-slate-950 text-[10px] font-black animate-bounce cursor-pointer"
                     >
                       🌟 KOMBO U-N-O!
@@ -775,7 +904,12 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
         {state.reflexRaceActive && viewerPlayer && (
           <button
             type="button"
-            onClick={() => onUpdateState((prev) => resolveReflexRaceTap(prev, viewerPlayer.id))}
+            onClick={() =>
+              dispatchAction(
+                { type: 'pack_reflex_race_tap' },
+                (prev) => resolveReflexRaceTap(prev, viewerPlayer.id)
+              )
+            }
             className="px-6 py-3 rounded-2xl bg-gradient-to-r from-yellow-300 via-orange-500 to-rose-600 text-slate-950 font-display font-black text-base shadow-2xl animate-bounce cursor-pointer"
           >
             🏁 TAP CEPAT SEKARANG! (Hindari +2 Kartu!)
@@ -835,7 +969,12 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
           <button
             type="button"
             disabled={state.activeRuleQTE.completedPlayerIds.includes(viewerPlayer.id)}
-            onClick={() => onUpdateState((prev) => completeRuleQTE(prev, viewerPlayer.id))}
+            onClick={() =>
+              dispatchAction(
+                { type: 'house_complete_qte' },
+                (prev) => completeRuleQTE(prev, viewerPlayer.id)
+              )
+            }
             className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-300 via-orange-500 to-rose-600 text-slate-950 font-display font-black text-sm sm:text-base shadow-2xl animate-bounce cursor-pointer disabled:opacity-50"
           >
             {state.activeRuleQTE.completedPlayerIds.includes(viewerPlayer.id)
@@ -891,7 +1030,12 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
             {isViewerTurn && viewerPlayer && (
               <button
                 type="button"
-                onClick={() => onUpdateState((prev) => takePartyPileUp(prev, viewerPlayer.id))}
+                onClick={() =>
+                  dispatchAction(
+                    { type: 'party_take_pile_up' },
+                    (prev) => takePartyPileUp(prev, viewerPlayer.id)
+                  )
+                }
                 className="shrink-0 px-3.5 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-display font-black text-xs shadow-lg cursor-pointer"
               >
                 Ambil +{state.partyPileUp.cards.length} Kartu
@@ -934,7 +1078,12 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
               <div className="flex items-center justify-center gap-2">
                 <button
                   type="button"
-                  onClick={() => onUpdateState((prev) => breakEmojiHold(prev, viewerPlayer.name))}
+                  onClick={() =>
+                    dispatchAction(
+                      { type: 'dare_break_emoji' },
+                      (prev) => breakEmojiHold(prev, viewerPlayer.name)
+                    )
+                  }
                   className="px-4 py-2 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-display font-black text-xs shadow-lg cursor-pointer"
                 >
                   💥 LAPORKAN EKSPRESI {state.emojiChallenge.targetName} PECAH! ({state.emojiChallenge.emoji} → +4 KARTU)
@@ -948,7 +1097,12 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
         {state.emojiChallenge && viewerPlayer && state.emojiChallenge.targetId === viewerPlayer.id && !state.emojiChallenge.maintained && (
           <button
             type="button"
-            onClick={() => onUpdateState((prev) => maintainEmojiExpression(prev, viewerPlayer.id))}
+            onClick={() =>
+              dispatchAction(
+                { type: 'dare_maintain_emoji' },
+                (prev) => maintainEmojiExpression(prev, viewerPlayer.id)
+              )
+            }
             className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-yellow-300 to-pink-500 text-slate-950 font-display font-black text-xs sm:text-sm shadow-xl animate-bounce cursor-pointer"
           >
             {state.emojiChallenge.emoji} PERTAHANKAN EKSPRESI: {state.emojiChallenge.label}! (Klik Sekarang)
@@ -1009,7 +1163,12 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                 {isViewerTurn && viewerPlayer && state.golfDrawnCard.source === 'draw' && (
                   <button
                     type="button"
-                    onClick={() => onUpdateState((prev) => golfDiscardDrawn(prev, viewerPlayer.id))}
+                    onClick={() =>
+                      dispatchAction(
+                        { type: 'golf_discard_drawn' },
+                        (prev) => golfDiscardDrawn(prev, viewerPlayer.id)
+                      )
+                    }
                     className="shrink-0 px-4 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-display font-black text-xs shadow-lg cursor-pointer"
                   >
                     🗑️ BUANG KE DISCARD
@@ -1025,7 +1184,11 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                     playable={Boolean(isViewerTurn && !state.golfDrawnCard)}
                     onClick={
                       isViewerTurn && viewerPlayer
-                        ? () => onUpdateState((prev) => golfTakeDraw(prev, viewerPlayer.id))
+                        ? () =>
+                            dispatchAction(
+                              { type: 'golf_take_draw' },
+                              (prev) => golfTakeDraw(prev, viewerPlayer.id)
+                            )
                         : undefined
                     }
                   />
@@ -1044,7 +1207,11 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                     dimmed={Boolean(isViewerTurn && topDiscard && isGolfActionCard(topDiscard))}
                     onClick={
                       isViewerTurn && viewerPlayer && topDiscard && !isGolfActionCard(topDiscard)
-                        ? () => onUpdateState((prev) => golfTakeDiscard(prev, viewerPlayer.id))
+                        ? () =>
+                            dispatchAction(
+                              { type: 'golf_take_discard' },
+                              (prev) => golfTakeDiscard(prev, viewerPlayer.id)
+                            )
                         : undefined
                     }
                   />
@@ -1142,7 +1309,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                   disabled={!isViewerTurn}
                   onClick={() =>
                     viewerPlayer &&
-                    onUpdateState((prev) => finishDosMatching(prev, viewerPlayer.id))
+                    dispatchAction(
+                      { type: 'dos_finish_matching' },
+                      (prev) => finishDosMatching(prev, viewerPlayer.id)
+                    )
                   }
                   className="px-4 py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-xs font-display font-black cursor-pointer shadow-lg"
                 >
@@ -1333,7 +1503,7 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
               <button
                 type="button"
                 onClick={() =>
-                  onUpdateState((prev) =>
+                  dispatchAction({ type: 'pass_after_draw' }, (prev) =>
                     prev.variantId === 'uno-teams'
                       ? passAfterTeamsDraw(prev, viewerPlayer.id)
                       : prev.variantId === 'uno-junior'
@@ -1364,7 +1534,12 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
             viewerPlayer.id !== state.pendingPrompt?.actorId && (
               <button
                 type="button"
-                onClick={() => onUpdateState((prev) => challengeLiarsClaim(prev, viewerPlayer.id))}
+                onClick={() =>
+                  dispatchAction(
+                    { type: 'challenge_liars' },
+                    (prev) => challengeLiarsClaim(prev, viewerPlayer.id)
+                  )
+                }
                 className="px-4 py-2 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-display font-black text-xs shadow-xl animate-pulse cursor-pointer"
               >
                 🚨 TANTANG BOHONG! ({state.liarClaim.actorName})
@@ -1376,7 +1551,7 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
             <button
               type="button"
               onClick={() =>
-                onUpdateState((prev) =>
+                dispatchAction({ type: 'speed_jump_in', cardId: speedCutCard.id }, (prev) =>
                   prev.variantId === 'uno-house-remix'
                     ? attemptHouseRemixJumpIn(prev, viewerPlayer.id, speedCutCard.id)
                     : attemptSpeedPlayCutIn(prev, viewerPlayer.id, speedCutCard.id)
@@ -1393,7 +1568,12 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
           {availableMeld && viewerPlayer && (
             <button
               type="button"
-              onClick={() => onUpdateState((prev) => playRummyMeld(prev, viewerPlayer.id))}
+              onClick={() =>
+                dispatchAction(
+                  { type: 'rummy_play_meld' },
+                  (prev) => playRummyMeld(prev, viewerPlayer.id)
+                )
+              }
               className="px-4 py-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 font-display font-black text-xs shadow-xl cursor-pointer"
             >
               🀄 TURUNKAN MELD {availableMeld.kind.toUpperCase()} ({availableMeld.cards.length} TILE)!
@@ -1403,14 +1583,24 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
             <>
               <button
                 type="button"
-                onClick={() => onUpdateState((prev) => commitRummyTurn(prev, viewerPlayer.id))}
+                onClick={() =>
+                  dispatchAction(
+                    { type: 'rummy_commit_turn' },
+                    (prev) => commitRummyTurn(prev, viewerPlayer.id)
+                  )
+                }
                 className="px-4 py-2 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-display font-black text-xs shadow-lg cursor-pointer"
               >
                 ✅ SELESAI GILIRAN ({state.rummyTransaction.rackTileIdsPlayed.length}/4 Tile)
               </button>
               <button
                 type="button"
-                onClick={() => onUpdateState((prev) => revertRummyTurn(prev, viewerPlayer.id))}
+                onClick={() =>
+                  dispatchAction(
+                    { type: 'rummy_revert_turn' },
+                    (prev) => revertRummyTurn(prev, viewerPlayer.id)
+                  )
+                }
                 className="px-3.5 py-2 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-display font-bold text-xs cursor-pointer"
               >
                 ↩️ REVERT
@@ -1448,7 +1638,9 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
             !viewerPlayer.calledUno && (
               <button
                 type="button"
-                onClick={() => onUpdateState((prev) => callHubUno(prev, viewerPlayer.id))}
+                onClick={() =>
+                  dispatchAction({ type: 'call_uno' }, (prev) => callHubUno(prev, viewerPlayer.id))
+                }
                 className="px-5 py-2 rounded-2xl bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 text-slate-950 font-display font-black text-xs shadow-xl animate-bounce flex items-center gap-1.5 cursor-pointer"
               >
                 <Megaphone className="w-4 h-4" />
@@ -1462,7 +1654,7 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
               <button
                 type="button"
                 onClick={() =>
-                  onUpdateState((prev) =>
+                  dispatchAction({ type: 'catch_uno' }, (prev) =>
                     prev.variantId === 'uno-attack'
                       ? catchAttackUno(prev, viewerPlayer.name)
                       : prev.variantId === 'uno-golf'
@@ -1544,11 +1736,16 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                           )}
                           onClick={() =>
                             canSwapSlot(topSlot) &&
-                            onUpdateState((prev) =>
-                              ruleset.executeAction(prev, viewerPlayer.id, {
-                                cardId: topSlot.card.id,
-                                golfSlotIndex: topIdx,
-                              })
+                            dispatchAction(
+                              {
+                                type: 'play_card',
+                                move: { cardId: topSlot.card.id, golfSlotIndex: topIdx },
+                              },
+                              (prev) =>
+                                ruleset.executeAction(prev, viewerPlayer.id, {
+                                  cardId: topSlot.card.id,
+                                  golfSlotIndex: topIdx,
+                                })
                             )
                           }
                         />
@@ -1564,11 +1761,16 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                           )}
                           onClick={() =>
                             canSwapSlot(botSlot) &&
-                            onUpdateState((prev) =>
-                              ruleset.executeAction(prev, viewerPlayer.id, {
-                                cardId: botSlot.card.id,
-                                golfSlotIndex: botIdx,
-                              })
+                            dispatchAction(
+                              {
+                                type: 'play_card',
+                                move: { cardId: botSlot.card.id, golfSlotIndex: botIdx },
+                              },
+                              (prev) =>
+                                ruleset.executeAction(prev, viewerPlayer.id, {
+                                  cardId: botSlot.card.id,
+                                  golfSlotIndex: botIdx,
+                                })
                             )
                           }
                         />
@@ -1641,7 +1843,11 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      onUpdateState((prev) => ({ ...prev, phase: 'playing', pendingPrompt: null }))
+                      dispatchAction({ type: 'cancel_prompt' }, (prev) => ({
+                        ...prev,
+                        phase: 'playing',
+                        pendingPrompt: null,
+                      }))
                     }
                     className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
                   >
@@ -1657,7 +1863,11 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                     <button
                       key={col}
                       type="button"
-                      onClick={() => onUpdateState((prev) => ruleset.resolvePrompt(prev, { color: col }))}
+                      onClick={() =>
+                        dispatchAction({ type: 'resolve_prompt', payload: { color: col } }, (prev) =>
+                          ruleset.resolvePrompt(prev, { color: col })
+                        )
+                      }
                       className={`py-4 rounded-2xl border-2 font-display font-black text-base text-white shadow-lg cursor-pointer ${COLOR_BUTTON_STYLE[col]}`}
                     >
                       {getColorLabel(col)}
@@ -1675,7 +1885,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      onUpdateState((prev) => ruleset.resolvePrompt(prev, { challengeChoice: 'trust' }))
+                      dispatchAction(
+                        { type: 'resolve_prompt', payload: { challengeChoice: 'trust' } },
+                        (prev) => ruleset.resolvePrompt(prev, { challengeChoice: 'trust' })
+                      )
                     }
                     className="py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white font-display font-black text-xs sm:text-sm cursor-pointer"
                   >
@@ -1684,7 +1897,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      onUpdateState((prev) => ruleset.resolvePrompt(prev, { challengeChoice: 'challenge' }))
+                      dispatchAction(
+                        { type: 'resolve_prompt', payload: { challengeChoice: 'challenge' } },
+                        (prev) => ruleset.resolvePrompt(prev, { challengeChoice: 'challenge' })
+                      )
                     }
                     className="py-3.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-display font-black text-xs sm:text-sm cursor-pointer"
                   >
@@ -1719,8 +1935,13 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                           <button
                             type="button"
                             onClick={() =>
-                              onUpdateState((prev) =>
-                                ruleset.resolvePrompt(prev, { targetPlayerId: sub.playerId })
+                              dispatchAction(
+                                {
+                                  type: 'resolve_prompt',
+                                  payload: { targetPlayerId: sub.playerId },
+                                },
+                                (prev) =>
+                                  ruleset.resolvePrompt(prev, { targetPlayerId: sub.playerId })
                               )
                             }
                             className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-display font-black text-xs cursor-pointer"
@@ -1734,8 +1955,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      onUpdateState((prev) =>
-                        ruleset.resolvePrompt(prev, { challengeChoice: 'trust' })
+                      dispatchAction(
+                        { type: 'resolve_prompt', payload: { challengeChoice: 'trust' } },
+                        (prev) =>
+                          ruleset.resolvePrompt(prev, { challengeChoice: 'trust' })
                       )
                     }
                     className="w-full py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-black text-xs sm:text-sm cursor-pointer"
@@ -1751,7 +1974,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      onUpdateState((prev) => ruleset.resolvePrompt(prev, { challengeChoice: 'trust' }))
+                      dispatchAction(
+                        { type: 'resolve_prompt', payload: { challengeChoice: 'trust' } },
+                        (prev) => ruleset.resolvePrompt(prev, { challengeChoice: 'trust' })
+                      )
                     }
                     className="py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-black text-sm cursor-pointer"
                   >
@@ -1760,7 +1986,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      onUpdateState((prev) => ruleset.resolvePrompt(prev, { challengeChoice: 'challenge' }))
+                      dispatchAction(
+                        { type: 'resolve_prompt', payload: { challengeChoice: 'challenge' } },
+                        (prev) => ruleset.resolvePrompt(prev, { challengeChoice: 'challenge' })
+                      )
                     }
                     className="py-3.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-display font-black text-sm cursor-pointer"
                   >
@@ -1786,8 +2015,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                     <button
                       type="button"
                       onClick={() =>
-                        onUpdateState((prev) =>
-                          ruleset.resolvePrompt(prev, { challengeChoice: 'complete_dare' })
+                        dispatchAction(
+                          { type: 'resolve_prompt', payload: { challengeChoice: 'complete_dare' } },
+                          (prev) =>
+                            ruleset.resolvePrompt(prev, { challengeChoice: 'complete_dare' })
                         )
                       }
                       className="py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-display font-black text-xs sm:text-sm cursor-pointer"
@@ -1797,8 +2028,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                     <button
                       type="button"
                       onClick={() =>
-                        onUpdateState((prev) =>
-                          ruleset.resolvePrompt(prev, { challengeChoice: 'skip_dare' })
+                        dispatchAction(
+                          { type: 'resolve_prompt', payload: { challengeChoice: 'skip_dare' } },
+                          (prev) =>
+                            ruleset.resolvePrompt(prev, { challengeChoice: 'skip_dare' })
                         )
                       }
                       className="py-3.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-display font-black text-xs sm:text-sm cursor-pointer"
@@ -1847,11 +2080,19 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      onUpdateState((prev) =>
-                        ruleset.resolvePrompt(prev, {
-                          color: darePickColor,
-                          textValue: String(darePickNum),
-                        })
+                      dispatchAction(
+                        {
+                          type: 'resolve_prompt',
+                          payload: {
+                            color: darePickColor,
+                            textValue: String(darePickNum),
+                          },
+                        },
+                        (prev) =>
+                          ruleset.resolvePrompt(prev, {
+                            color: darePickColor,
+                            textValue: String(darePickNum),
+                          })
                       )
                     }
                     className="w-full py-3 rounded-2xl bg-pink-500 hover:bg-pink-400 text-white font-display font-black text-sm cursor-pointer"
@@ -1903,11 +2144,19 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                         emojiStackCardId ||
                         viewerPlayer.hand.find((c) => c.type === 'number')?.id;
                       setEmojiStackCardId('');
-                      onUpdateState((prev) =>
-                        ruleset.resolvePrompt(prev, {
-                          color: darePickColor,
-                          passCardId: picked,
-                        })
+                      dispatchAction(
+                        {
+                          type: 'resolve_prompt',
+                          payload: {
+                            color: darePickColor,
+                            passCardId: picked,
+                          },
+                        },
+                        (prev) =>
+                          ruleset.resolvePrompt(prev, {
+                            color: darePickColor,
+                            passCardId: picked,
+                          })
                       );
                     }}
                     className="w-full py-3 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-display font-black text-sm cursor-pointer"
@@ -1940,8 +2189,13 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                         key={preset}
                         type="button"
                         onClick={() =>
-                          onUpdateState((prev) =>
-                            ruleset.resolvePrompt(prev, { color: darePickColor, textValue: preset })
+                          dispatchAction(
+                            {
+                              type: 'resolve_prompt',
+                              payload: { color: darePickColor, textValue: preset },
+                            },
+                            (prev) =>
+                              ruleset.resolvePrompt(prev, { color: darePickColor, textValue: preset })
                           )
                         }
                         className="w-full text-left px-3 py-2 rounded-xl bg-slate-800 hover:bg-amber-400 hover:text-slate-950 text-xs font-bold cursor-pointer"
@@ -1963,8 +2217,13 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                       onClick={() => {
                         const txt = customRuleInput.trim();
                         setCustomRuleInput('');
-                        onUpdateState((prev) =>
-                          ruleset.resolvePrompt(prev, { color: darePickColor, textValue: txt })
+                        dispatchAction(
+                          {
+                            type: 'resolve_prompt',
+                            payload: { color: darePickColor, textValue: txt },
+                          },
+                          (prev) =>
+                            ruleset.resolvePrompt(prev, { color: darePickColor, textValue: txt })
                         );
                       }}
                       className="px-3.5 py-2 rounded-xl bg-amber-400 text-slate-950 font-black text-xs cursor-pointer"
@@ -1984,8 +2243,13 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                         key={preset.title}
                         type="button"
                         onClick={() =>
-                          onUpdateState((prev) =>
-                            ruleset.resolvePrompt(prev, { textValue: preset.title, color: state.activeColor })
+                          dispatchAction(
+                            {
+                              type: 'resolve_prompt',
+                              payload: { textValue: preset.title, color: state.activeColor },
+                            },
+                            (prev) =>
+                              ruleset.resolvePrompt(prev, { textValue: preset.title, color: state.activeColor })
                           )
                         }
                         className="w-full text-left px-3 py-2 rounded-xl bg-slate-800 hover:bg-amber-400 hover:text-slate-950 text-xs font-bold cursor-pointer transition"
@@ -2008,8 +2272,13 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                         if (!customRuleInput.trim()) return;
                         const txt = customRuleInput.trim();
                         setCustomRuleInput('');
-                        onUpdateState((prev) =>
-                          ruleset.resolvePrompt(prev, { textValue: txt, color: state.activeColor })
+                        dispatchAction(
+                          {
+                            type: 'resolve_prompt',
+                            payload: { textValue: txt, color: state.activeColor },
+                          },
+                          (prev) =>
+                            ruleset.resolvePrompt(prev, { textValue: txt, color: state.activeColor })
                         );
                       }}
                       className="px-3.5 py-2 rounded-xl bg-amber-400 text-slate-950 font-black text-xs cursor-pointer"
@@ -2072,12 +2341,21 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                       onClick={() => {
                         const txt = customRuleInput.trim();
                         setCustomRuleInput('');
-                        onUpdateState((prev) =>
-                          ruleset.resolvePrompt(prev, {
-                            passCardId: String(gameChangerSlot),
-                            color: gameChangerColor,
-                            textValue: txt || undefined,
-                          })
+                        dispatchAction(
+                          {
+                            type: 'resolve_prompt',
+                            payload: {
+                              passCardId: String(gameChangerSlot),
+                              color: gameChangerColor,
+                              textValue: txt || undefined,
+                            },
+                          },
+                          (prev) =>
+                            ruleset.resolvePrompt(prev, {
+                              passCardId: String(gameChangerSlot),
+                              color: gameChangerColor,
+                              textValue: txt || undefined,
+                            })
                         );
                       }}
                       className="px-3.5 py-2 rounded-xl bg-amber-400 text-slate-950 font-black text-xs cursor-pointer"
@@ -2119,8 +2397,13 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                               type="button"
                               onClick={() => {
                                 setGolfDoubleFirst(null);
-                                onUpdateState((prev) =>
-                                  ruleset.resolvePrompt(prev, { targetPlayerId: target.id })
+                                dispatchAction(
+                                  {
+                                    type: 'resolve_prompt',
+                                    payload: { targetPlayerId: target.id },
+                                  },
+                                  (prev) =>
+                                    ruleset.resolvePrompt(prev, { targetPlayerId: target.id })
                                 );
                               }}
                               className="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-display font-black text-xs cursor-pointer"
@@ -2138,11 +2421,19 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                                   } else {
                                     const first = golfDoubleFirst;
                                     setGolfDoubleFirst(null);
-                                    onUpdateState((prev) =>
-                                      ruleset.resolvePrompt(prev, {
-                                        targetPlayerId: first,
-                                        secondTargetPlayerId: target.id,
-                                      })
+                                    dispatchAction(
+                                      {
+                                        type: 'resolve_prompt',
+                                        payload: {
+                                          targetPlayerId: first,
+                                          secondTargetPlayerId: target.id,
+                                        },
+                                      },
+                                      (prev) =>
+                                        ruleset.resolvePrompt(prev, {
+                                          targetPlayerId: first,
+                                          secondTargetPlayerId: target.id,
+                                        })
                                     );
                                   }
                                 }}
@@ -2180,8 +2471,13 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                         key={target.id}
                         type="button"
                         onClick={() =>
-                          onUpdateState((prev) =>
-                            ruleset.resolvePrompt(prev, { targetPlayerId: target.id })
+                          dispatchAction(
+                            {
+                              type: 'resolve_prompt',
+                              payload: { targetPlayerId: target.id },
+                            },
+                            (prev) =>
+                              ruleset.resolvePrompt(prev, { targetPlayerId: target.id })
                           )
                         }
                         className="w-full p-3.5 rounded-2xl bg-slate-800 hover:bg-amber-400 hover:text-slate-950 border border-slate-700 font-display font-bold text-sm flex items-center justify-between cursor-pointer transition"
@@ -2203,7 +2499,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                         key={tile.id}
                         type="button"
                         onClick={() =>
-                          onUpdateState((prev) => ruleset.resolvePrompt(prev, { passCardId: tile.id }))
+                          dispatchAction(
+                            { type: 'resolve_prompt', payload: { passCardId: tile.id } },
+                            (prev) => ruleset.resolvePrompt(prev, { passCardId: tile.id })
+                          )
                         }
                         className="w-full p-3 rounded-2xl bg-slate-800 hover:bg-amber-400 hover:text-slate-950 border border-slate-700 font-display font-black text-xs sm:text-sm cursor-pointer transition"
                       >
@@ -2223,7 +2522,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                         size="sm"
                         playable
                         onClick={() =>
-                          onUpdateState((prev) => ruleset.resolvePrompt(prev, { passCardId: c.id }))
+                          dispatchAction(
+                            { type: 'resolve_prompt', payload: { passCardId: c.id } },
+                            (prev) => ruleset.resolvePrompt(prev, { passCardId: c.id })
+                          )
                         }
                       />
                     </div>

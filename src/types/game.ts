@@ -170,6 +170,7 @@ export interface OnlineLobbyPlayer {
   name: string;
   isHost: boolean;
   connected: boolean;
+  ready: boolean;
 }
 
 export interface OnlineRoomInfo {
@@ -178,6 +179,14 @@ export interface OnlineRoomInfo {
   totalRounds: number;
   started: boolean;
   players: OnlineLobbyPlayer[];
+}
+
+export interface OnlinePlayerNotice {
+  id: string;
+  type: 'disconnected' | 'reconnected' | 'left' | 'host_changed' | 'joined';
+  playerName: string;
+  message: string;
+  timestamp: number;
 }
 
 export const CARD_COLORS: CardColor[] = ['red', 'yellow', 'green', 'blue'];

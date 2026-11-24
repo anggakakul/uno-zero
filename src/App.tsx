@@ -3,6 +3,7 @@ import {
   GameConfig,
   GameMode,
   GameState,
+  OnlinePlayerNotice,
   OnlineRoomInfo,
   SlotPosition,
 } from './types/game';
@@ -35,6 +36,7 @@ import {
   sendOnlineAction,
   startOnlineGame,
   subscribeOnlineEvents,
+  toggleOnlineReady,
   updateOnlineRoomSettings,
 } from './services/onlineClient';
 import {
@@ -85,6 +87,10 @@ export function App({ onBackToHub }: AppProps = {}) {
   const [inviteRoomCode, setInviteRoomCode] = useState<string | null>(() => getRoomCodeFromUrl());
   const [onlineError, setOnlineError] = useState<string | null>(null);
   const [onlineLoading, setOnlineLoading] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<
+    'connected' | 'reconnecting' | 'disconnected'
+  >('connected');
+  const [onlineNotice, setOnlineNotice] = useState<OnlinePlayerNotice | null>(null);
 
   const recordedMatchIdRef = useRef<string | null>(null);
 
@@ -173,6 +179,12 @@ export function App({ onBackToHub }: AppProps = {}) {
         setGameState(state);
         setScreen('game');
       },
+      onPlayerNotice: (notice) => {
+        setOnlineNotice(notice);
+      },
+      onConnectionChange: (status) => {
+        setConnectionStatus(status);
+      },
       onSocketReconnect: async () => {
         const res = await reconnectOnlineRoom(roomCode);
         if (res.ok && res.room) {
@@ -183,6 +195,12 @@ export function App({ onBackToHub }: AppProps = {}) {
     });
     return unsub;
   }, [onlineRoom?.code]);
+
+  useEffect(() => {
+    if (!onlineNotice) return;
+    const t = setTimeout(() => setOnlineNotice(null), 4500);
+    return () => clearTimeout(t);
+  }, [onlineNotice?.id]);
 
   // AI Bot Turn Automation (1.15s delay per step)
   useEffect(() => {
@@ -400,10 +418,17 @@ export function App({ onBackToHub }: AppProps = {}) {
         prefillCode={inviteRoomCode}
         error={onlineError}
         loading={onlineLoading}
+        connectionStatus={connectionStatus}
+        notice={onlineNotice}
         onCreateRoom={handleCreateRoom}
         onJoinRoom={handleJoinRoom}
+        onToggleReady={() => toggleOnlineReady()}
         onUpdateRounds={updateOnlineRoomSettings}
-        onStartOnlineGame={startOnlineGame}
+        onStartOnlineGame={async () => {
+          setOnlineError(null);
+          const res = await startOnlineGame();
+          if (!res.ok && res.error) setOnlineError(res.error);
+        }}
         onLeaveRoom={handleLeaveOnline}
         onBack={() => {
           setInviteRoomCode(null);
@@ -489,6 +514,8 @@ export function App({ onBackToHub }: AppProps = {}) {
         state={gameState}
         viewerPlayerId={viewerPlayerId}
         roomCode={mode === 'online' ? onlineRoom?.code : null}
+        connectionStatus={connectionStatus}
+        onlineNotice={onlineNotice}
         onFlipInitial={(colIdx: number, pos: SlotPosition) => {
           if (mode === 'online') sendOnlineAction({ type: 'flip_initial', colIdx, pos });
           else setGameState((prev) => (prev ? flipInitialCard(prev, colIdx, pos) : prev));

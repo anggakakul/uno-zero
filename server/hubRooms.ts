@@ -1,75 +1,854 @@
 import { Server, Socket } from 'socket.io';
-import { HubGameState, VariantId, VariantSettings } from '../src/hub/types';
+import { getVariantMetadata } from '../src/hub/catalog';
+import {
+  applyHubOnlineAction,
+  autoStepHubState,
+  buildHubOnlinePlayerInits,
+  sanitizeHubGameStateForPlayer,
+} from '../src/hub/engine/hubActionEngine';
+import { resolveFlashReflex } from '../src/hub/expansions/digitalTools';
+import { getRuleset } from '../src/hub/rulesets';
+import { completeRuleQTE } from '../src/hub/rulesets/unoHouseRemix';
+import { handleTriplePlayTimeout } from '../src/hub/rulesets/unoTriplePlay';
+import {
+  HubGameState,
+  HubOnlineAction,
+  HubOnlineRoomInfo,
+  VariantId,
+  VariantSettings,
+} from '../src/hub/types';
+import { OnlinePlayerNotice } from '../src/types/game';
+
+const HUB_TURN_TIMEOUT_MS = 30_000;
+const HUB_AI_STEP_MS = 750;
+const HUB_ROOM_INACTIVE_TTL_MS = 30 * 60 * 1000;
+const HUB_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
+type HubVariantId = Exclude<VariantId, 'uno-zero'>;
+
+interface HubServerPlayer {
+  id: string;
+  sessionId: string;
+  socketId: string;
+  name: string;
+  isHost: boolean;
+  connected: boolean;
+  ready: boolean;
+}
 
 interface HubOnlineRoom {
   code: string;
-  hostSocketId: string;
-  variantId: VariantId;
+  hostId: string;
+  variantId: HubVariantId;
   settings: VariantSettings;
+  fillWithBots: boolean;
+  targetPlayerCount: number;
+  started: boolean;
+  players: HubServerPlayer[];
   state: HubGameState | null;
-  players: { socketId: string; name: string }[];
+  turnTimer: ReturnType<typeof setTimeout> | null;
+  aiTimer: ReturnType<typeof setTimeout> | null;
+  tickInterval: ReturnType<typeof setInterval> | null;
+  processedActionIds: Set<string>;
+  lastActivityAt: number;
 }
 
-const hubRooms = new Map<string, HubOnlineRoom>();
-
-function genCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let out = '';
-  for (let i = 0; i < 5; i += 1) out += chars[Math.floor(Math.random() * chars.length)];
-  return hubRooms.has(out) ? genCode() : out;
+export interface HubRoomManager {
+  registerSocket: (socket: Socket) => void;
+  getActiveRoomCount: () => number;
+  cleanup: () => void;
 }
 
-/**
- * Registers real-time UNO GAME HUB room synchronization events on the existing Socket.IO server
- * without touching any UNO ZERO room events!
- */
-export function registerHubRoomHandlers(io: Server, socket: Socket): void {
-  socket.on(
-    'hub:create_room',
-    (
-      payload: { playerName: string; variantId: VariantId; settings: VariantSettings; initialState: HubGameState },
-      cb?: (res: { ok: boolean; code?: string; error?: string }) => void
-    ) => {
-      const code = genCode();
-      const room: HubOnlineRoom = {
-        code,
-        hostSocketId: socket.id,
-        variantId: payload.variantId,
-        settings: payload.settings,
-        state: payload.initialState,
-        players: [{ socketId: socket.id, name: payload.playerName }],
-      };
-      hubRooms.set(code, room);
-      socket.join(`hub:${code}`);
-      cb?.({ ok: true, code });
+const VALID_HUB_VARIANTS = new Set<string>([
+  'uno-classic',
+  'uno-flip',
+  'uno-flex',
+  'uno-all-wild',
+  'uno-no-mercy',
+  'uno-teams',
+  'uno-attack',
+  'uno-triple-play',
+  'uno-junior',
+  'uno-party',
+  'uno-golf',
+  'uno-liars',
+  'uno-house-remix',
+  'uno-dare-emoji',
+  'uno-express',
+  'uno-rummy-up',
+  'uno-hearts',
+  'dos-mode',
+  'ono-99',
+]);
+
+function isHubVariant(v: unknown): v is HubVariantId {
+  return typeof v === 'string' && VALID_HUB_VARIANTS.has(v);
+}
+
+function makeNotice(
+  type: OnlinePlayerNotice['type'],
+  playerName: string,
+  message: string
+): OnlinePlayerNotice {
+  return {
+    id: `hn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    type,
+    playerName,
+    message,
+    timestamp: Date.now(),
+  };
+}
+
+export function createHubRoomManager(io: Server): HubRoomManager {
+  const hubRooms = new Map<string, HubOnlineRoom>();
+  const socketToHubRoom = new Map<string, { code: string; playerId: string }>();
+
+  function genCode(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let out = '';
+    for (let i = 0; i < 5; i += 1) out += chars[Math.floor(Math.random() * chars.length)];
+    return hubRooms.has(out) ? genCode() : out;
+  }
+
+  function touchRoom(room: HubOnlineRoom) {
+    room.lastActivityAt = Date.now();
+  }
+
+  function clearRoomTimers(room: HubOnlineRoom) {
+    if (room.turnTimer) {
+      clearTimeout(room.turnTimer);
+      room.turnTimer = null;
     }
-  );
+    if (room.aiTimer) {
+      clearTimeout(room.aiTimer);
+      room.aiTimer = null;
+    }
+    if (room.tickInterval) {
+      clearInterval(room.tickInterval);
+      room.tickInterval = null;
+    }
+  }
 
-  socket.on(
-    'hub:join_room',
-    (
-      payload: { code: string; playerName: string },
-      cb?: (res: { ok: boolean; state?: HubGameState | null; error?: string }) => void
-    ) => {
-      const code = payload.code.trim().toUpperCase();
-      const room = hubRooms.get(code);
-      if (!room) {
-        cb?.({ ok: false, error: 'Room Hub tidak ditemukan.' });
+  function getRoomInfo(room: HubOnlineRoom): HubOnlineRoomInfo {
+    const meta = getVariantMetadata(room.variantId);
+    const totalExpected = room.fillWithBots
+      ? Math.max(room.players.length, room.targetPlayerCount, meta.minPlayers)
+      : room.players.length;
+    return {
+      code: room.code,
+      hostId: room.hostId,
+      variantId: room.variantId,
+      settings: room.settings,
+      fillWithBots: room.fillWithBots,
+      targetPlayerCount: room.targetPlayerCount,
+      started: room.started,
+      players: room.players.map((p, idx) => ({
+        id: p.id,
+        name: p.name,
+        isHost: p.isHost,
+        connected: p.connected,
+        ready: p.ready,
+        teamId: meta.isTeamGame ? idx % (totalExpected === 6 ? 3 : 2) : undefined,
+      })),
+    };
+  }
+
+  function broadcastRoomInfo(room: HubOnlineRoom) {
+    io.to(`hub:${room.code}`).emit('hub:room_updated', getRoomInfo(room));
+  }
+
+  function emitNotice(room: HubOnlineRoom, notice: OnlinePlayerNotice) {
+    io.to(`hub:${room.code}`).emit('hub:player_notice', notice);
+  }
+
+  function scheduleAutomation(room: HubOnlineRoom, resetTurnTimer: boolean) {
+    if (room.aiTimer) {
+      clearTimeout(room.aiTimer);
+      room.aiTimer = null;
+    }
+    if (room.tickInterval) {
+      clearInterval(room.tickInterval);
+      room.tickInterval = null;
+    }
+    if (resetTurnTimer && room.turnTimer) {
+      clearTimeout(room.turnTimer);
+      room.turnTimer = null;
+    }
+
+    const state = room.state;
+    if (!state || state.phase === 'round_over' || state.phase === 'game_over') {
+      if (state) state.turnDeadline = null;
+      clearRoomTimers(room);
+      return;
+    }
+
+    // 1. House Rules QTE AI Auto-Reaction
+    if (state.phase === 'house_rule_qte' && state.activeRuleQTE) {
+      const pendingAI = state.players.find(
+        (p) => p.isAI && !state.activeRuleQTE?.completedPlayerIds.includes(p.id)
+      );
+      if (pendingAI) {
+        room.aiTimer = setTimeout(() => {
+          if (!room.state || room.state.phase !== 'house_rule_qte') return;
+          room.state = completeRuleQTE(room.state, pendingAI.id);
+          broadcastGameState(room, true);
+        }, HUB_AI_STEP_MS);
+      }
+    }
+
+    // 2. AI Bot Turn or Prompt Automation (Server-Authoritative!)
+    const promptActor = state.pendingPrompt
+      ? state.players.find((p) => p.id === state.pendingPrompt?.actorId)
+      : null;
+    const activePlayer = state.players[state.currentPlayerIndex];
+    const needsAI = promptActor ? promptActor.isAI : activePlayer?.isAI;
+
+    if (needsAI && state.phase !== 'house_rule_qte') {
+      state.turnDeadline = null;
+      room.aiTimer = setTimeout(() => {
+        if (!room.state) return;
+        touchRoom(room);
+        const next = autoStepHubState(room.state);
+        if (next !== room.state) {
+          room.state = next;
+          broadcastGameState(room, true);
+        }
+      }, HUB_AI_STEP_MS);
+      return;
+    }
+
+    // 3. Server-side 1-second tick for UNO Triple Play Timer Mode & UNO Flash Reflex
+    const needsTripleTimer =
+      state.variantId === 'uno-triple-play' &&
+      state.settings.triplePlayMode === 'timer' &&
+      state.phase === 'playing';
+    const needsFlashTimer = Boolean(state.toolState?.flashActive && state.phase === 'playing');
+
+    if (needsTripleTimer || needsFlashTimer) {
+      room.tickInterval = setInterval(() => {
+        if (!room.state || room.state.phase !== 'playing') {
+          if (room.tickInterval) clearInterval(room.tickInterval);
+          room.tickInterval = null;
+          return;
+        }
+        let changed = false;
+        let next = room.state;
+
+        if (
+          next.variantId === 'uno-triple-play' &&
+          next.settings.triplePlayMode === 'timer' &&
+          next.turnTimerSeconds !== undefined
+        ) {
+          if (next.turnTimerSeconds <= 1) {
+            next = handleTriplePlayTimeout(next);
+          } else {
+            next = { ...next, turnTimerSeconds: next.turnTimerSeconds - 1 };
+          }
+          changed = true;
+        }
+
+        if (next.toolState?.flashActive) {
+          const f = next.toolState.flashActive;
+          if (f.secondsLeft <= 1) {
+            next = resolveFlashReflex(next, f.targetPlayerId, false);
+          } else {
+            next = {
+              ...next,
+              toolState: {
+                ...next.toolState,
+                flashActive: { ...f, secondsLeft: f.secondsLeft - 1 },
+              },
+            };
+          }
+          changed = true;
+        }
+
+        if (changed) {
+          room.state = next;
+          const turnChanged =
+            next.currentPlayerIndex !== state.currentPlayerIndex || next.phase !== state.phase;
+          broadcastGameState(room, turnChanged);
+        }
+      }, 1000);
+    }
+
+    // 4. General Human Turn / Prompt Timeout (30s, or 8s if active player is disconnected)
+    if (resetTurnTimer || !room.turnTimer) {
+      if (room.turnTimer) clearTimeout(room.turnTimer);
+      const actorForTimer = promptActor ?? activePlayer;
+      const isDisconnected = actorForTimer && actorForTimer.connected === false;
+      const timeoutMs = isDisconnected ? 8_000 : HUB_TURN_TIMEOUT_MS;
+      state.turnDeadline = Date.now() + timeoutMs;
+
+      room.turnTimer = setTimeout(() => {
+        if (!room.state) return;
+        touchRoom(room);
+        const next = autoStepHubState(room.state);
+        if (next !== room.state) {
+          room.state = next;
+          broadcastGameState(room, true);
+        }
+      }, timeoutMs);
+    }
+  }
+
+  function broadcastGameState(room: HubOnlineRoom, resetTimer = true) {
+    if (!room.state) return;
+
+    if (resetTimer) {
+      scheduleAutomation(room, true);
+    } else {
+      scheduleAutomation(room, false);
+    }
+
+    for (const player of room.players) {
+      const sock = io.sockets.sockets.get(player.socketId);
+      if (sock) {
+        const sanitized = sanitizeHubGameStateForPlayer(room.state, player.id);
+        sock.emit('hub:game_state', sanitized);
+      }
+    }
+  }
+
+  function getActiveRoomAndPlayer(
+    socket: Socket
+  ): { room: HubOnlineRoom; player: HubServerPlayer } | null {
+    const link = socketToHubRoom.get(socket.id);
+    if (!link) return null;
+    const room = hubRooms.get(link.code);
+    if (!room) return null;
+    const player = room.players.find((p) => p.id === link.playerId);
+    if (!player) return null;
+    return { room, player };
+  }
+
+  function migrateHostIfNeeded(room: HubOnlineRoom, departingPlayerId: string) {
+    if (room.hostId !== departingPlayerId) return;
+    const nextHost =
+      room.players.find((p) => p.id !== departingPlayerId && p.connected) ??
+      room.players.find((p) => p.id !== departingPlayerId);
+    if (!nextHost) return;
+    for (const p of room.players) {
+      p.isHost = p.id === nextHost.id;
+    }
+    room.hostId = nextHost.id;
+    nextHost.ready = true;
+    emitNotice(
+      room,
+      makeNotice('host_changed', nextHost.name, `${nextHost.name} sekarang menjadi Host room.`)
+    );
+  }
+
+  function handleHubDisconnect(socket: Socket, explicitLeave: boolean) {
+    const link = socketToHubRoom.get(socket.id);
+    if (!link) return;
+    socketToHubRoom.delete(socket.id);
+    socket.leave(`hub:${link.code}`);
+
+    const room = hubRooms.get(link.code);
+    if (!room) return;
+
+    const departing = room.players.find((p) => p.id === link.playerId);
+    if (!departing) return;
+
+    if (!room.started && explicitLeave) {
+      const departingName = departing.name;
+      room.players = room.players.filter((p) => p.id !== link.playerId);
+      if (room.players.length === 0) {
+        clearRoomTimers(room);
+        hubRooms.delete(room.code);
         return;
       }
-      if (!room.players.some((p) => p.socketId === socket.id)) {
-        room.players.push({ socketId: socket.id, name: payload.playerName });
-      }
-      socket.join(`hub:${code}`);
-      io.to(`hub:${code}`).emit('hub:players_updated', room.players);
-      cb?.({ ok: true, state: room.state });
+      migrateHostIfNeeded(room, link.playerId);
+      emitNotice(
+        room,
+        makeNotice('left', departingName, `${departingName} keluar dari room.`)
+      );
+      broadcastRoomInfo(room);
+      return;
     }
-  );
 
-  socket.on('hub:sync_state', (payload: { code: string; state: HubGameState }) => {
-    const room = hubRooms.get(payload.code.trim().toUpperCase());
-    if (!room) return;
-    room.state = payload.state;
-    socket.to(`hub:${room.code}`).emit('hub:state_updated', payload.state);
-  });
+    // Reserve seat for reconnection
+    if (departing.socketId === socket.id) {
+      departing.connected = false;
+    }
+
+    if (explicitLeave) {
+      migrateHostIfNeeded(room, link.playerId);
+    }
+
+    if (room.state) {
+      room.state = {
+        ...room.state,
+        players: room.state.players.map((gp) =>
+          gp.id === link.playerId ? { ...gp, connected: false } : gp
+        ),
+      };
+      broadcastGameState(room, false);
+    }
+
+    emitNotice(
+      room,
+      makeNotice(
+        explicitLeave ? 'left' : 'disconnected',
+        departing.name,
+        explicitLeave
+          ? `${departing.name} meninggalkan pertandingan.`
+          : `${departing.name} terputus koneksi. Menunggu sambung ulang...`
+      )
+    );
+    broadcastRoomInfo(room);
+  }
+
+  const cleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [code, room] of hubRooms.entries()) {
+      const idleMs = now - room.lastActivityAt;
+      const allDisconnected = room.players.every((p) => !p.connected);
+      const finished = room.state?.phase === 'game_over';
+      if (
+        idleMs > HUB_ROOM_INACTIVE_TTL_MS ||
+        (allDisconnected && idleMs > 5 * 60 * 1000) ||
+        (finished && idleMs > 15 * 60 * 1000)
+      ) {
+        clearRoomTimers(room);
+        hubRooms.delete(code);
+      }
+    }
+  }, HUB_CLEANUP_INTERVAL_MS);
+
+  return {
+    getActiveRoomCount: () => hubRooms.size,
+    cleanup: () => {
+      clearInterval(cleanupInterval);
+      for (const room of hubRooms.values()) {
+        clearRoomTimers(room);
+      }
+      hubRooms.clear();
+      socketToHubRoom.clear();
+    },
+    registerSocket: (socket: Socket) => {
+      socket.on(
+        'hub:create_room',
+        (
+          payload: {
+            playerName: string;
+            sessionId?: string;
+            variantId: VariantId;
+            settings?: VariantSettings;
+            fillWithBots?: boolean;
+            targetPlayerCount?: number;
+          },
+          cb?: (res: {
+            ok: boolean;
+            error?: string;
+            room?: HubOnlineRoomInfo;
+            playerId?: string;
+          }) => void
+        ) => {
+          if (!isHubVariant(payload?.variantId)) {
+            cb?.({ ok: false, error: 'Mode UNO tidak valid.' });
+            return;
+          }
+
+          // Leave any prior hub room on this socket
+          if (socketToHubRoom.has(socket.id)) {
+            handleHubDisconnect(socket, true);
+          }
+
+          const meta = getVariantMetadata(payload.variantId);
+          const code = genCode();
+          const sessionId =
+            payload.sessionId?.trim() ||
+            `hsess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const playerId = sessionId;
+
+          const host: HubServerPlayer = {
+            id: playerId,
+            sessionId,
+            socketId: socket.id,
+            name: payload.playerName?.trim().slice(0, 20) || 'Host',
+            isHost: true,
+            connected: true,
+            ready: true,
+          };
+
+          const settings: VariantSettings = {
+            ...meta.defaultSettings,
+            ...(payload.settings ?? {}),
+          };
+
+          const defaultTarget = Math.max(
+            meta.minPlayers,
+            Math.min(meta.maxPlayers, payload.targetPlayerCount ?? meta.minPlayers)
+          );
+
+          const room: HubOnlineRoom = {
+            code,
+            hostId: playerId,
+            variantId: payload.variantId,
+            settings,
+            fillWithBots: Boolean(payload.fillWithBots),
+            targetPlayerCount: defaultTarget,
+            started: false,
+            players: [host],
+            state: null,
+            turnTimer: null,
+            aiTimer: null,
+            tickInterval: null,
+            processedActionIds: new Set(),
+            lastActivityAt: Date.now(),
+          };
+
+          hubRooms.set(code, room);
+          socketToHubRoom.set(socket.id, { code, playerId });
+          socket.join(`hub:${code}`);
+          cb?.({ ok: true, room: getRoomInfo(room), playerId });
+        }
+      );
+
+      socket.on(
+        'hub:join_room',
+        (
+          payload: { code: string; playerName: string; sessionId?: string },
+          cb?: (res: {
+            ok: boolean;
+            error?: string;
+            room?: HubOnlineRoomInfo;
+            playerId?: string;
+            gameState?: HubGameState | null;
+          }) => void
+        ) => {
+          const code = payload?.code?.trim().toUpperCase();
+          const room = code ? hubRooms.get(code) : undefined;
+          if (!room) {
+            cb?.({ ok: false, error: 'Room tidak ditemukan atau sudah kedaluwarsa.' });
+            return;
+          }
+
+          const sessionId =
+            payload.sessionId?.trim() ||
+            `hsess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+          // Reconnect if sessionId already exists in room
+          const existing = room.players.find((p) => p.sessionId === sessionId);
+          if (existing) {
+            existing.socketId = socket.id;
+            existing.connected = true;
+            if (payload.playerName?.trim()) {
+              existing.name = payload.playerName.trim().slice(0, 20);
+            }
+            touchRoom(room);
+            socketToHubRoom.set(socket.id, { code, playerId: existing.id });
+            socket.join(`hub:${code}`);
+
+            if (room.state) {
+              room.state = {
+                ...room.state,
+                players: room.state.players.map((gp) =>
+                  gp.id === existing.id ? { ...gp, connected: true } : gp
+                ),
+              };
+              broadcastGameState(room, false);
+            }
+            emitNotice(
+              room,
+              makeNotice('reconnected', existing.name, `${existing.name} kembali terhubung!`)
+            );
+            broadcastRoomInfo(room);
+            cb?.({
+              ok: true,
+              room: getRoomInfo(room),
+              playerId: existing.id,
+              gameState: room.state
+                ? sanitizeHubGameStateForPlayer(room.state, existing.id)
+                : null,
+            });
+            return;
+          }
+
+          if (room.started) {
+            cb?.({ ok: false, error: 'Permainan di room ini sudah dimulai.' });
+            return;
+          }
+
+          const meta = getVariantMetadata(room.variantId);
+          if (room.players.length >= meta.maxPlayers) {
+            cb?.({
+              ok: false,
+              error: `Room sudah penuh (maksimal ${meta.maxPlayers} pemain untuk ${meta.name}).`,
+            });
+            return;
+          }
+
+          if (socketToHubRoom.has(socket.id)) {
+            handleHubDisconnect(socket, true);
+          }
+
+          const playerId = sessionId;
+          const player: HubServerPlayer = {
+            id: playerId,
+            sessionId,
+            socketId: socket.id,
+            name: payload.playerName?.trim().slice(0, 20) || `Pemain ${room.players.length + 1}`,
+            isHost: false,
+            connected: true,
+            ready: false,
+          };
+
+          room.players.push(player);
+          touchRoom(room);
+          socketToHubRoom.set(socket.id, { code, playerId });
+          socket.join(`hub:${code}`);
+          emitNotice(
+            room,
+            makeNotice('joined', player.name, `${player.name} bergabung ke room.`)
+          );
+          broadcastRoomInfo(room);
+          cb?.({ ok: true, room: getRoomInfo(room), playerId, gameState: null });
+        }
+      );
+
+      socket.on(
+        'hub:reconnect_room',
+        (
+          payload: { code: string; sessionId: string },
+          cb?: (res: {
+            ok: boolean;
+            room?: HubOnlineRoomInfo;
+            playerId?: string;
+            gameState?: HubGameState | null;
+          }) => void
+        ) => {
+          const code = payload?.code?.trim().toUpperCase();
+          const room = code ? hubRooms.get(code) : undefined;
+          if (!room) {
+            cb?.({ ok: false });
+            return;
+          }
+          const existing = room.players.find((p) => p.sessionId === payload.sessionId);
+          if (!existing) {
+            cb?.({ ok: false });
+            return;
+          }
+
+          existing.socketId = socket.id;
+          existing.connected = true;
+          touchRoom(room);
+          socketToHubRoom.set(socket.id, { code, playerId: existing.id });
+          socket.join(`hub:${code}`);
+
+          if (room.state) {
+            room.state = {
+              ...room.state,
+              players: room.state.players.map((gp) =>
+                gp.id === existing.id ? { ...gp, connected: true } : gp
+              ),
+            };
+            broadcastGameState(room, false);
+          }
+          emitNotice(
+            room,
+            makeNotice('reconnected', existing.name, `${existing.name} kembali terhubung!`)
+          );
+          broadcastRoomInfo(room);
+          cb?.({
+            ok: true,
+            room: getRoomInfo(room),
+            playerId: existing.id,
+            gameState: room.state
+              ? sanitizeHubGameStateForPlayer(room.state, existing.id)
+              : null,
+          });
+        }
+      );
+
+      socket.on('hub:toggle_ready', (payload?: { ready?: boolean }) => {
+        const ctx = getActiveRoomAndPlayer(socket);
+        if (!ctx || ctx.room.started) return;
+        const { room, player } = ctx;
+        player.ready = typeof payload?.ready === 'boolean' ? payload.ready : !player.ready;
+        touchRoom(room);
+        broadcastRoomInfo(room);
+      });
+
+      socket.on(
+        'hub:update_settings',
+        (payload: {
+          variantId?: VariantId;
+          settings?: Partial<VariantSettings>;
+          fillWithBots?: boolean;
+          targetPlayerCount?: number;
+        }) => {
+          const ctx = getActiveRoomAndPlayer(socket);
+          if (!ctx || !ctx.player.isHost || ctx.room.started) return;
+          const { room } = ctx;
+
+          if (payload.variantId && isHubVariant(payload.variantId)) {
+            const newMeta = getVariantMetadata(payload.variantId);
+            if (room.players.length <= newMeta.maxPlayers) {
+              room.variantId = payload.variantId;
+              room.settings = { ...newMeta.defaultSettings, ...(payload.settings ?? {}) };
+              room.targetPlayerCount = Math.max(
+                newMeta.minPlayers,
+                Math.min(newMeta.maxPlayers, payload.targetPlayerCount ?? newMeta.minPlayers)
+              );
+            }
+          } else if (payload.settings) {
+            room.settings = { ...room.settings, ...payload.settings };
+          }
+
+          if (typeof payload.fillWithBots === 'boolean') {
+            room.fillWithBots = payload.fillWithBots;
+          }
+
+          if (typeof payload.targetPlayerCount === 'number') {
+            const meta = getVariantMetadata(room.variantId);
+            room.targetPlayerCount = Math.max(
+              meta.minPlayers,
+              Math.min(meta.maxPlayers, Math.floor(payload.targetPlayerCount))
+            );
+          }
+
+          touchRoom(room);
+          broadcastRoomInfo(room);
+        }
+      );
+
+      socket.on(
+        'hub:start_game',
+        (cb?: (res: { ok: boolean; error?: string }) => void) => {
+          const ctx = getActiveRoomAndPlayer(socket);
+          if (!ctx) {
+            cb?.({ ok: false, error: 'Kamu tidak berada dalam room.' });
+            return;
+          }
+          const { room, player } = ctx;
+          if (!player.isHost) {
+            cb?.({ ok: false, error: 'Hanya Host yang dapat memulai permainan.' });
+            return;
+          }
+          if (room.started) {
+            cb?.({ ok: false, error: 'Permainan sudah dimulai.' });
+            return;
+          }
+
+          const meta = getVariantMetadata(room.variantId);
+          const connectedPlayers = room.players.filter((p) => p.connected);
+          if (connectedPlayers.length < 2) {
+            cb?.({ ok: false, error: 'Minimal 2 pemain online diperlukan untuk memulai.' });
+            return;
+          }
+
+          const unreadyGuest = connectedPlayers.find((p) => !p.isHost && !p.ready);
+          if (unreadyGuest) {
+            cb?.({
+              ok: false,
+              error: `Menunggu ${unreadyGuest.name} menekan tombol Siap (Ready).`,
+            });
+            return;
+          }
+
+          if (!room.fillWithBots) {
+            if (connectedPlayers.length < meta.minPlayers) {
+              cb?.({
+                ok: false,
+                error: `${meta.name} membutuhkan minimal ${meta.minPlayers} pemain (atau aktifkan Isi dengan Bot AI).`,
+              });
+              return;
+            }
+            if (meta.isTeamGame && connectedPlayers.length % 2 !== 0) {
+              cb?.({
+                ok: false,
+                error: `${meta.name} membutuhkan jumlah pemain genap (4, 6, atau 8) atau aktifkan Isi dengan Bot AI.`,
+              });
+              return;
+            }
+          }
+
+          const playerInits = buildHubOnlinePlayerInits(
+            connectedPlayers.map((p) => ({ id: p.id, name: p.name })),
+            room.variantId,
+            room.fillWithBots,
+            room.targetPlayerCount
+          );
+
+          const ruleset = getRuleset(room.variantId);
+          const initialState = ruleset.initializeGame(playerInits, 'online', room.settings);
+
+          // Ensure every player has connected: true initially
+          room.state = {
+            ...initialState,
+            players: initialState.players.map((gp) => ({ ...gp, connected: true })),
+          };
+          room.started = true;
+          room.processedActionIds.clear();
+          touchRoom(room);
+
+          broadcastRoomInfo(room);
+          broadcastGameState(room, true);
+          cb?.({ ok: true });
+        }
+      );
+
+      socket.on(
+        'hub:game_action',
+        (
+          payload: { action: HubOnlineAction; actionId?: string },
+          cb?: (res: { ok: boolean; error?: string }) => void
+        ) => {
+          const ctx = getActiveRoomAndPlayer(socket);
+          if (!ctx || !ctx.room.state || !payload?.action) {
+            cb?.({ ok: false, error: 'Aksi tidak valid.' });
+            return;
+          }
+
+          const { room, player } = ctx;
+          if (payload.actionId) {
+            if (room.processedActionIds.has(payload.actionId)) {
+              cb?.({ ok: true });
+              return;
+            }
+            room.processedActionIds.add(payload.actionId);
+            if (room.processedActionIds.size > 300) {
+              const first = room.processedActionIds.values().next().value;
+              if (first) room.processedActionIds.delete(first);
+            }
+          }
+
+          const prev = room.state;
+          touchRoom(room);
+
+          const updated = applyHubOnlineAction(prev, player.id, player.isHost, payload.action);
+          if (updated !== prev) {
+            // Preserve live connected status on players
+            const connMap = new Map(room.players.map((p) => [p.id, p.connected]));
+            room.state = {
+              ...updated,
+              players: updated.players.map((gp) => ({
+                ...gp,
+                connected: gp.isAI ? true : connMap.get(gp.id) ?? gp.connected ?? true,
+              })),
+            };
+            const turnChanged =
+              room.state.currentPlayerIndex !== prev.currentPlayerIndex ||
+              room.state.phase !== prev.phase ||
+              room.state.pendingPrompt?.actorId !== prev.pendingPrompt?.actorId;
+            broadcastGameState(room, turnChanged);
+            cb?.({ ok: true });
+          } else {
+            cb?.({ ok: false, error: 'Aksi ditolak oleh server (bukan giliran atau tidak sah).' });
+          }
+        }
+      );
+
+      socket.on('hub:leave_room', () => {
+        handleHubDisconnect(socket, true);
+      });
+
+      socket.on('disconnect', () => {
+        handleHubDisconnect(socket, false);
+      });
+    },
+  };
 }

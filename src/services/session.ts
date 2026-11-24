@@ -1,6 +1,7 @@
 const SESSION_ID_KEY = 'uno_zero_guest_session_id_v1';
 const NICKNAME_KEY = 'uno_zero_guest_nickname_v1';
 const ACTIVE_ROOM_KEY = 'uno_zero_active_room_v1';
+const ACTIVE_HUB_ROOM_KEY = 'uno_hub_active_room_v1';
 
 export function getOrCreateSessionId(): string {
   try {
@@ -74,4 +75,50 @@ export function setRoomCodeInUrl(code: string | null): void {
 export function buildInviteLink(roomCode: string): string {
   if (typeof window === 'undefined') return `/?room=${roomCode}`;
   return `${window.location.origin}/?room=${roomCode.toUpperCase()}`;
+}
+
+export function loadActiveHubRoomCode(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_HUB_ROOM_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveActiveHubRoomCode(code: string | null): void {
+  try {
+    if (code) {
+      localStorage.setItem(ACTIVE_HUB_ROOM_KEY, code.toUpperCase());
+    } else {
+      localStorage.removeItem(ACTIVE_HUB_ROOM_KEY);
+    }
+  } catch {
+    // Ignore storage error
+  }
+}
+
+export function getHubRoomCodeFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get('hubRoom');
+  if (!raw) return null;
+  const clean = raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return clean.length >= 4 && clean.length <= 6 ? clean : null;
+}
+
+export function setHubRoomCodeInUrl(code: string | null): void {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (code) {
+    url.searchParams.set('hubRoom', code.toUpperCase());
+    url.searchParams.delete('room');
+  } else {
+    url.searchParams.delete('hubRoom');
+  }
+  window.history.replaceState({}, '', url.toString());
+}
+
+export function buildHubInviteLink(roomCode: string): string {
+  if (typeof window === 'undefined') return `/?hubRoom=${roomCode}`;
+  return `${window.location.origin}/?hubRoom=${roomCode.toUpperCase()}`;
 }

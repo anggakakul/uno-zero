@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   Check,
+  CheckCircle2,
+  Circle,
   Copy,
   Crown,
   Flag,
@@ -14,8 +16,9 @@ import {
   Sparkles,
   Users,
   Wifi,
+  WifiOff,
 } from 'lucide-react';
-import { OnlineRoomInfo } from '../types/game';
+import { OnlinePlayerNotice, OnlineRoomInfo } from '../types/game';
 import {
   buildInviteLink,
   loadGuestNickname,
@@ -28,8 +31,11 @@ interface OnlineLobbyPageProps {
   prefillCode?: string | null;
   error: string | null;
   loading: boolean;
+  connectionStatus?: 'connected' | 'reconnecting' | 'disconnected';
+  notice?: OnlinePlayerNotice | null;
   onCreateRoom: (playerName: string, totalRounds: number) => void;
   onJoinRoom: (code: string, playerName: string) => void;
+  onToggleReady?: () => void;
   onUpdateRounds: (rounds: number) => void;
   onStartOnlineGame: () => void;
   onLeaveRoom: () => void;
@@ -42,8 +48,11 @@ export const OnlineLobbyPage: React.FC<OnlineLobbyPageProps> = ({
   prefillCode,
   error,
   loading,
+  connectionStatus = 'connected',
+  notice,
   onCreateRoom,
   onJoinRoom,
+  onToggleReady,
   onUpdateRounds,
   onStartOnlineGame,
   onLeaveRoom,
@@ -85,6 +94,11 @@ export const OnlineLobbyPage: React.FC<OnlineLobbyPageProps> = ({
 
   if (room) {
     const inviteUrl = buildInviteLink(room.code);
+    const me = room.players.find((p) => p.id === myPlayerId);
+    const connectedPlayers = room.players.filter((p) => p.connected);
+    const allGuestsReady = connectedPlayers.every((p) => p.isHost || p.ready);
+    const canStart = isHost && connectedPlayers.length >= 2 && allGuestsReady;
+
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4">
         <div className="max-w-xl mx-auto space-y-6">
@@ -97,11 +111,39 @@ export const OnlineLobbyPage: React.FC<OnlineLobbyPageProps> = ({
               <ArrowLeft className="w-4 h-4" />
               Keluar Room
             </button>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-300 text-xs font-bold">
-              <Wifi className="w-3.5 h-3.5" />
-              Terhubung Real-Time
+            <span
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
+                connectionStatus === 'connected'
+                  ? 'bg-emerald-500/15 text-emerald-300'
+                  : connectionStatus === 'reconnecting'
+                  ? 'bg-amber-500/15 text-amber-300 animate-pulse'
+                  : 'bg-rose-500/15 text-rose-300'
+              }`}
+            >
+              {connectionStatus === 'connected' ? (
+                <Wifi className="w-3.5 h-3.5" />
+              ) : (
+                <WifiOff className="w-3.5 h-3.5" />
+              )}
+              {connectionStatus === 'connected'
+                ? 'Terhubung Real-Time'
+                : connectionStatus === 'reconnecting'
+                ? 'Menyambung Ulang...'
+                : 'Terputus'}
             </span>
           </div>
+
+          {notice && (
+            <div className="rounded-2xl bg-sky-500/15 border border-sky-400/40 px-4 py-2.5 text-xs font-bold text-sky-200">
+              🔔 {notice.message}
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-2xl bg-rose-950/70 border border-rose-500/60 p-3.5 text-xs sm:text-sm text-rose-200 font-semibold">
+              {error}
+            </div>
+          )}
 
           {/* Room Code & Shareable Invite Link */}
           <div className="rounded-3xl bg-gradient-to-br from-sky-500/15 via-slate-900 to-slate-900 border border-sky-400/40 p-6 text-center space-y-4">
@@ -199,16 +241,39 @@ export const OnlineLobbyPage: React.FC<OnlineLobbyPageProps> = ({
                     <span className="w-7 h-7 rounded-lg bg-slate-800 font-display font-bold text-xs flex items-center justify-center">
                       {idx + 1}
                     </span>
+                    <span
+                      className={`w-2.5 h-2.5 rounded-full ${
+                        p.connected ? 'bg-emerald-400' : 'bg-rose-500 animate-pulse'
+                      }`}
+                      title={p.connected ? 'Online' : 'Terputus'}
+                    />
                     <span className="font-bold text-sm text-white">
                       {p.name} {p.id === myPlayerId && <span className="text-sky-300">(Kamu)</span>}
                     </span>
                   </div>
-                  {p.isHost && (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-400/15 text-amber-300 text-xs font-bold">
-                      <Crown className="w-3 h-3" />
-                      Host
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {!p.connected && (
+                      <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 text-[10px] font-bold">
+                        Offline
+                      </span>
+                    )}
+                    {p.isHost ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-400/15 text-amber-300 text-xs font-bold">
+                        <Crown className="w-3 h-3" />
+                        Host
+                      </span>
+                    ) : p.ready ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Siap
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 text-xs font-bold">
+                        <Circle className="w-3 h-3" />
+                        Belum Siap
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -225,19 +290,30 @@ export const OnlineLobbyPage: React.FC<OnlineLobbyPageProps> = ({
           {isHost ? (
             <button
               type="button"
-              disabled={room.players.length < 2}
+              disabled={!canStart}
               onClick={onStartOnlineGame}
               className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 hover:from-amber-300 hover:to-rose-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-display font-black text-lg flex items-center justify-center gap-2 shadow-2xl cursor-pointer transition"
             >
               <Play className="w-5 h-5 fill-slate-950" />
-              {room.players.length < 2
+              {connectedPlayers.length < 2
                 ? 'Menunggu Minimal 2 Pemain...'
-                : `MULAI PERMAINAN (${room.players.length} Pemain)`}
+                : !allGuestsReady
+                ? 'Menunggu Semua Pemain SIAP...'
+                : `MULAI PERMAINAN (${connectedPlayers.length} Pemain)`}
             </button>
           ) : (
-            <div className="text-center py-3 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-slate-300 font-semibold">
-              Menunggu Host memulai permainan...
-            </div>
+            <button
+              type="button"
+              onClick={onToggleReady}
+              className={`w-full py-4 px-6 rounded-2xl font-display font-black text-base sm:text-lg flex items-center justify-center gap-2 shadow-xl cursor-pointer transition ${
+                me?.ready
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
+                  : 'bg-sky-500 hover:bg-sky-400 text-slate-950'
+              }`}
+            >
+              <CheckCircle2 className="w-5 h-5" />
+              {me?.ready ? 'SUDAH SIAP ✓ (Klik untuk Batal)' : 'TEKAN SIAP (READY)'}
+            </button>
           )}
         </div>
       </div>

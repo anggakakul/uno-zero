@@ -212,6 +212,7 @@ export interface HubPlayer {
   id: string;
   name: string;
   isAI: boolean;
+  connected?: boolean;
   hand: HubCard[];
   score: number;
   calledUno: boolean;
@@ -630,7 +631,67 @@ export interface HubGameState {
     chargesLeft: number;
   } | null;
   comebackUnoProgress?: Record<string, ('U' | 'N' | 'O')[]>;
+  /** Server-authoritative turn deadline epoch ms for online matches */
+  turnDeadline?: number | null;
 }
+
+export interface HubOnlineLobbyPlayer {
+  id: string;
+  name: string;
+  isHost: boolean;
+  connected: boolean;
+  ready: boolean;
+  teamId?: number;
+}
+
+export interface HubOnlineRoomInfo {
+  code: string;
+  hostId: string;
+  variantId: Exclude<VariantId, 'uno-zero'>;
+  settings: VariantSettings;
+  fillWithBots: boolean;
+  targetPlayerCount: number;
+  started: boolean;
+  players: HubOnlineLobbyPlayer[];
+}
+
+export interface HubResolvePromptPayload {
+  color?: HubCardColor;
+  targetPlayerId?: string;
+  secondTargetPlayerId?: string;
+  passCardId?: string;
+  useFlex?: boolean;
+  textValue?: string;
+  challengeChoice?: 'trust' | 'challenge' | 'complete_dare' | 'skip_dare';
+}
+
+export type HubOnlineAction =
+  | { type: 'play_card'; move: MoveInput }
+  | { type: 'draw_or_pass' }
+  | { type: 'resolve_prompt'; payload: HubResolvePromptPayload }
+  | { type: 'cancel_prompt' }
+  | { type: 'call_uno' }
+  | { type: 'catch_uno' }
+  | { type: 'pass_after_draw' }
+  | { type: 'challenge_liars' }
+  | { type: 'speed_jump_in'; cardId: string }
+  | { type: 'party_take_pile_up' }
+  | { type: 'golf_take_draw' }
+  | { type: 'golf_take_discard' }
+  | { type: 'golf_discard_drawn' }
+  | { type: 'dos_finish_matching' }
+  | { type: 'rummy_play_meld' }
+  | { type: 'rummy_commit_turn' }
+  | { type: 'rummy_revert_turn' }
+  | { type: 'house_complete_qte' }
+  | { type: 'dare_maintain_emoji' }
+  | { type: 'dare_break_emoji' }
+  | { type: 'tool_flash_reflex' }
+  | { type: 'tool_overcharge_blast'; level: 1 | 2 | 3 }
+  | { type: 'pack_comeback_uno_combo' }
+  | { type: 'pack_reflex_race_tap' }
+  | { type: 'next_round' }
+  | { type: 'play_again' };
 
 export interface MoveInput {
   cardId: string;

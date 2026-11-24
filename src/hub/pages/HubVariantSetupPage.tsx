@@ -240,8 +240,8 @@ export const HubVariantSetupPage: React.FC<HubVariantSetupPageProps> = ({
                 }`}
               >
                 <Globe className="w-5 h-5 text-sky-400 mb-1" />
-                <div className="font-display font-black text-xs sm:text-sm">ONLINE HOST SYNC</div>
-                <div className="text-[10px] opacity-80">Sinkronisasi real-time</div>
+                <div className="font-display font-black text-xs sm:text-sm">ONLINE MULTIPLAYER</div>
+                <div className="text-[10px] opacity-80">Lobi real-time &amp; anti-cheat</div>
               </button>
             </div>
 
