@@ -1,15 +1,26 @@
-import { ActionCardScoreRule, Card, CardColor, GridColumn } from '../types/game';
+import { Card, CardColor, GridColumn, OFFICIAL_ACTION_CARD_POINTS } from '../types/game';
 
 /**
- * Official UNO Zero point values at round end:
+ * Official Mattel UNO Zero point values at round end:
  * - Number Cards (0-6): face value (0 = 0 pts, 6 = 6 pts)
- * - Action Cards (Skip, Reverse, Draw Two, Double Draw Two): 10 pts (or 20 pts if configured)
+ * - Reverse: 10 pts
+ * - Skip: 11 pts
+ * - Draw Two: 12 pts
+ * - Double Draw Two: 22 pts
  */
-export function getCardPoints(card: Card, actionCardPoints: ActionCardScoreRule = 10): number {
-  if (card.type === 'number') {
-    return card.value ?? 0;
+export function getCardPoints(card: Card): number {
+  switch (card.type) {
+    case 'number':
+      return card.value ?? 0;
+    case 'reverse':
+      return OFFICIAL_ACTION_CARD_POINTS.reverse;
+    case 'skip':
+      return OFFICIAL_ACTION_CARD_POINTS.skip;
+    case 'draw2':
+      return OFFICIAL_ACTION_CARD_POINTS.draw2;
+    case 'double_draw2':
+      return OFFICIAL_ACTION_CARD_POINTS.double_draw2;
   }
-  return actionCardPoints;
 }
 
 /**
@@ -91,14 +102,8 @@ export function getGridCards(columns: readonly GridColumn[]): Card[] {
 /**
  * Calculates total score of all remaining cards in a player's grid.
  */
-export function calculateGridPoints(
-  columns: readonly GridColumn[],
-  actionCardPoints: ActionCardScoreRule = 10
-): number {
-  return getGridCards(columns).reduce(
-    (sum, card) => sum + getCardPoints(card, actionCardPoints),
-    0
-  );
+export function calculateGridPoints(columns: readonly GridColumn[]): number {
+  return getGridCards(columns).reduce((sum, card) => sum + getCardPoints(card), 0);
 }
 
 /**

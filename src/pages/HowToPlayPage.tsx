@@ -88,30 +88,30 @@ export const HowToPlayPage: React.FC<HowToPlayPageProps> = ({ onBack }) => {
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="flex items-center gap-3 p-3 rounded-2xl bg-slate-950/60 border border-slate-800">
-              <UnoCard card={{ id: 'h-skip', type: 'skip', color: 'red' }} size="sm" />
+              <UnoCard card={{ id: 'h-rev', type: 'reverse', color: 'green' }} size="sm" />
               <div>
-                <h3 className="font-display font-bold text-white">Skip (10/20 poin)</h3>
-                <p className="text-xs text-slate-400">Melewatkan giliran pemain berikutnya.</p>
+                <h3 className="font-display font-bold text-white">Reverse (10 poin)</h3>
+                <p className="text-xs text-slate-400">Membalikkan arah urutan giliran.</p>
               </div>
             </div>
             <div className="flex items-center gap-3 p-3 rounded-2xl bg-slate-950/60 border border-slate-800">
-              <UnoCard card={{ id: 'h-rev', type: 'reverse', color: 'green' }} size="sm" />
+              <UnoCard card={{ id: 'h-skip', type: 'skip', color: 'red' }} size="sm" />
               <div>
-                <h3 className="font-display font-bold text-white">Reverse (10/20 poin)</h3>
-                <p className="text-xs text-slate-400">Membalikkan arah urutan giliran.</p>
+                <h3 className="font-display font-bold text-white">Skip (11 poin)</h3>
+                <p className="text-xs text-slate-400">Melewatkan giliran pemain berikutnya.</p>
               </div>
             </div>
             <div className="flex items-center gap-3 p-3 rounded-2xl bg-slate-950/60 border border-slate-800">
               <UnoCard card={{ id: 'h-d2', type: 'draw2', color: 'blue' }} size="sm" />
               <div>
-                <h3 className="font-display font-bold text-white">Draw Two (10/20 poin)</h3>
+                <h3 className="font-display font-bold text-white">Draw Two (12 poin)</h3>
                 <p className="text-xs text-slate-400">Lawan berikutnya tambah 2 kartu tertutup (1 kolom baru di kanan grid).</p>
               </div>
             </div>
             <div className="flex items-center gap-3 p-3 rounded-2xl bg-slate-950/60 border border-slate-800">
               <UnoCard card={{ id: 'h-dd2', type: 'double_draw2', color: 'yellow' }} size="sm" />
               <div>
-                <h3 className="font-display font-bold text-white">Double Draw Two (10/20 poin)</h3>
+                <h3 className="font-display font-bold text-white">Double Draw Two (22 poin)</h3>
                 <p className="text-xs text-slate-400">Beri +4 kartu (2 kolom) ke 1 lawan ATAU +2 kartu (1 kolom) ke 2 lawan berbeda.</p>
               </div>
             </div>
@@ -130,7 +130,7 @@ export const HowToPlayPage: React.FC<HowToPlayPageProps> = ({ onBack }) => {
           </p>
           <div className="rounded-2xl bg-slate-950/70 border border-slate-800 p-3.5 text-xs sm:text-sm text-slate-300 space-y-1">
             <div>• <strong>Angka 0–6:</strong> Sesuai angka kartu (0 = 0 poin, 6 = 6 poin).</div>
-            <div>• <strong>Kartu Aksi:</strong> 10 poin (atau 20 poin sesuai pengaturan Settings).</div>
+            <div>• <strong>Kartu Aksi:</strong> Reverse = <strong>10 poin</strong>, Skip = <strong>11 poin</strong>, Draw Two = <strong>12 poin</strong>, Double Draw Two = <strong>22 poin</strong>.</div>
             <div>• <strong>Urutan Ronde Berikutnya:</strong> Pemain dengan skor <strong>terendah</strong> pada ronde berjalan otomatis memulai duluan di ronde berikutnya!</div>
           </div>
         </section>

@@ -97,43 +97,19 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ config, onChange, on
           </div>
         </section>
 
-        {/* Scoring & Rules */}
+        {/* Rules */}
         <section className="rounded-3xl bg-slate-900/90 border border-amber-500/35 p-5 space-y-5">
           <h2 className="font-display font-bold text-lg text-white flex items-center gap-2">
             <Sliders className="w-5 h-5 text-amber-400" />
-            Pengaturan Skor &amp; Aturan
+            Nilai Poin Resmi &amp; Aturan Tambahan
           </h2>
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-bold text-slate-200">
-              Nilai Poin Kartu Aksi yang Tersisa di Grid Saat Akhir Ronde
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => updateHouseRule('actionCardPoints', 10)}
-                className={`p-3 rounded-2xl border text-left text-xs sm:text-sm cursor-pointer transition ${
-                  config.houseRules.actionCardPoints === 10
-                    ? 'bg-amber-400/15 border-amber-400 text-white'
-                    : 'bg-slate-950/60 border-slate-800 text-slate-400'
-                }`}
-              >
-                <div className="font-bold">10 Poin (Default Resmi)</div>
-                <div className="text-[11px] opacity-80">Skip, Reverse, Draw Two, Double Draw Two = 10 poin.</div>
-              </button>
-              <button
-                type="button"
-                onClick={() => updateHouseRule('actionCardPoints', 20)}
-                className={`p-3 rounded-2xl border text-left text-xs sm:text-sm cursor-pointer transition ${
-                  config.houseRules.actionCardPoints === 20
-                    ? 'bg-amber-400/15 border-amber-400 text-white'
-                    : 'bg-slate-950/60 border-slate-800 text-slate-400'
-                }`}
-              >
-                <div className="font-bold">20 Poin (Penalti Tinggi)</div>
-                <div className="text-[11px] opacity-80">Kartu aksi yang tak sempat dibuang bernilai 20 poin.</div>
-              </button>
-            </div>
+          <div className="rounded-2xl bg-slate-950/60 border border-slate-800 p-3.5 text-xs text-slate-300 grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
+            <div><div className="font-bold text-white">Angka 0–6</div><div className="text-emerald-300 font-black">0–6 poin</div></div>
+            <div><div className="font-bold text-white">Reverse</div><div className="text-amber-300 font-black">10 poin</div></div>
+            <div><div className="font-bold text-white">Skip</div><div className="text-amber-300 font-black">11 poin</div></div>
+            <div><div className="font-bold text-white">Draw Two</div><div className="text-amber-300 font-black">12 poin</div></div>
+            <div><div className="font-bold text-white">Double +2</div><div className="text-rose-300 font-black">22 poin</div></div>
           </div>
 
           <div className="space-y-1.5">

@@ -51,8 +51,7 @@ function findColumnMatchSwapSlot(
  * Finds the highest-value open card in the AI's grid (prioritizing action cards and 5-6).
  */
 function findHighestOpenSlot(
-  columns: readonly GridColumn[],
-  actionCardPoints: 10 | 20
+  columns: readonly GridColumn[]
 ): { colIdx: number; pos: SlotPosition; points: number } | null {
   let best: { colIdx: number; pos: SlotPosition; points: number } | null = null;
   for (let i = 0; i < columns.length; i++) {
@@ -60,7 +59,7 @@ function findHighestOpenSlot(
     for (const pos of ['top', 'bottom'] as const) {
       const slot = col[pos];
       if (slot?.faceUp && slot.card) {
-        const pts = getCardPoints(slot.card, actionCardPoints);
+        const pts = getCardPoints(slot.card);
         if (!best || pts > best.points) {
           best = { colIdx: i, pos, points: pts };
         }
@@ -107,8 +106,6 @@ export function decideAIMove(
   const aiPlayer = state.players[state.currentPlayerIndex];
   if (!aiPlayer) return null;
 
-  const actionPts = state.config.houseRules.actionCardPoints;
-
   if (state.phase === 'initial_flip') {
     const pick = pickRandomFaceDownSlot(aiPlayer.columns, rng);
     if (!pick) return null;
@@ -145,7 +142,7 @@ export function decideAIMove(
 
   if (state.turnStep === 'resolve_drawn' && state.drawnCard) {
     const card = state.drawnCard;
-    const cardPts = getCardPoints(card, actionPts);
+    const cardPts = getCardPoints(card);
     const shouldCallUno = (willDropToOne: boolean) => willDropToOne && rng() < 0.8;
 
     // 1. Immediate vertical column elimination!
@@ -162,7 +159,7 @@ export function decideAIMove(
     }
 
     // 2. Replace high open card (5, 6, or action card) if incoming card is strictly lower
-    const highOpen = findHighestOpenSlot(aiPlayer.columns, actionPts);
+    const highOpen = findHighestOpenSlot(aiPlayer.columns);
     if (highOpen && highOpen.points >= 5 && cardPts < highOpen.points) {
       return {
         action: 'swap_slot',

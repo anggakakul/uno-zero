@@ -153,13 +153,13 @@ export const UnoCard: React.FC<UnoCardProps> = ({
   const cornerText =
     card.type === 'number'
       ? String(card.value)
-      : card.type === 'skip'
-      ? '⊘'
       : card.type === 'reverse'
-      ? '⇄'
+      ? '10'
+      : card.type === 'skip'
+      ? '11'
       : card.type === 'draw2'
-      ? '+2'
-      : '+2×2';
+      ? '12'
+      : '22';
 
   const needsUnderline = card.type === 'number' && (card.value === 6 || card.value === 9);
 

@@ -1010,7 +1010,6 @@ export function autoPlayTimeoutTurn(
  */
 export function finishRound(state: GameState, triggerPlayerId: string): GameState {
   const scores: RoundPlayerScore[] = [];
-  const actionPts = state.config.houseRules.actionCardPoints;
 
   const updatedPlayers: Player[] = state.players.map((p) => {
     const revealedCols: GridColumn[] = p.columns.map((col) => ({
@@ -1022,7 +1021,7 @@ export function finishRound(state: GameState, triggerPlayerId: string): GameStat
     const { columns: cleanedCols, eliminatedCount } = eliminateMatchingColumns(revealedCols);
     const totalEliminated = p.eliminatedColumnsThisRound + eliminatedCount;
 
-    const points = calculateGridPoints(cleanedCols, actionPts);
+    const points = calculateGridPoints(cleanedCols);
     const cumulativeTotal = p.totalScore + points;
 
     scores.push({

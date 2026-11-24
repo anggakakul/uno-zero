@@ -36,13 +36,17 @@ export interface DeckConfig {
 }
 
 export type ReverseTwoPlayerRule = 'reverse_only' | 'act_as_skip';
-export type ActionCardScoreRule = 10 | 20;
 
 export interface HouseRules {
   reverseInTwoPlayers: ReverseTwoPlayerRule;
-  /** Official action card score at round end: 10 pts (default) or 20 pts */
-  actionCardPoints: ActionCardScoreRule;
 }
+
+export const OFFICIAL_ACTION_CARD_POINTS = {
+  reverse: 10,
+  skip: 11,
+  draw2: 12,
+  double_draw2: 22,
+} as const;
 
 export interface GameConfig {
   /** Official Mattel UNO Zero Golf-style game runs for 9 rounds (or 3/5 quick mode) */
@@ -201,7 +205,6 @@ export const DEFAULT_DECK_CONFIG: DeckConfig = {
 
 export const DEFAULT_HOUSE_RULES: HouseRules = {
   reverseInTwoPlayers: 'reverse_only',
-  actionCardPoints: 10,
 };
 
 export const DEFAULT_GAME_CONFIG: GameConfig = {

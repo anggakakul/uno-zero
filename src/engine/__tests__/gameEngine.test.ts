@@ -60,15 +60,17 @@ function makePlayingState(overrides: Partial<GameState>): GameState {
 }
 
 describe('Official 112-Card Deck (0-6 Numbers + 28 Actions)', () => {
-  it('generates exactly 84 number cards (0-6, 3 per color) + 28 action cards = 112 cards', () => {
+  it('generates exactly 84 number cards (0-6, 3 per color) + 28 action cards (8 Rev, 8 Skip, 8 Draw2, 4 DoubleDraw2) = 112 cards', () => {
     const deck = createDeck(DEFAULT_GAME_CONFIG.deckConfig);
     expect(deck.length).toBe(112);
     expect(getDeckTotalCount(DEFAULT_GAME_CONFIG.deckConfig)).toBe(112);
 
     const numberCards = deck.filter((c) => c.type === 'number');
-    const actionCards = deck.filter((c) => c.type !== 'number');
     expect(numberCards.length).toBe(84);
-    expect(actionCards.length).toBe(28);
+    expect(deck.filter((c) => c.type === 'reverse').length).toBe(8);
+    expect(deck.filter((c) => c.type === 'skip').length).toBe(8);
+    expect(deck.filter((c) => c.type === 'draw2').length).toBe(8);
+    expect(deck.filter((c) => c.type === 'double_draw2').length).toBe(4);
     expect(numberCards.every((c) => (c.value ?? -1) >= 0 && (c.value ?? 99) <= 6)).toBe(true);
   });
 
@@ -111,7 +113,7 @@ describe('Dynamic Grid Compaction & Action Card Trigger Rules', () => {
     expect(res.eliminatedCount).toBe(2);
     expect(res.columns.length).toBe(1); // Compacted cleanly!
     expect(res.columns[0].id).toBe('c2');
-    expect(calculateGridPoints(res.columns, 10)).toBe(6);
+    expect(calculateGridPoints(res.columns)).toBe(6);
   });
 
   it('does NOT trigger action card when placed INTO grid, ONLY triggers when old grid card discarded is an action card', () => {
@@ -196,19 +198,26 @@ describe('Dynamic Grid Compaction & Action Card Trigger Rules', () => {
   });
 });
 
-describe('Round End, Scoring (0-6 & Action 10pts), and Lowest-Score Starter for Next Round', () => {
-  it('sets player with LOWEST round score as starter of the next round', () => {
+describe('Round End, Official Scoring (0-6, Rev=10, Skip=11, Draw2=12, DoubleDraw2=22), and Lowest-Score Starter', () => {
+  it('calculates exact official points and sets player with LOWEST round score as starter of next round', () => {
     const r1: Card = { id: 'r1', type: 'number', color: 'red', value: 1 };
     const b6: Card = { id: 'b6', type: 'number', color: 'blue', value: 6 };
+    const revCard: Card = { id: 'rv', type: 'reverse', color: 'yellow' };
     const skipCard: Card = { id: 'sk', type: 'skip', color: 'green' };
+    const draw2Card: Card = { id: 'd2', type: 'draw2', color: 'blue' };
+    const dd2Card: Card = { id: 'dd2', type: 'double_draw2', color: 'red' };
 
-    expect(getCardPoints(skipCard, 10)).toBe(10);
-    expect(getCardPoints(skipCard, 20)).toBe(20);
+    expect(getCardPoints(r1)).toBe(1);
+    expect(getCardPoints(b6)).toBe(6);
+    expect(getCardPoints(revCard)).toBe(10);
+    expect(getCardPoints(skipCard)).toBe(11);
+    expect(getCardPoints(draw2Card)).toBe(12);
+    expect(getCardPoints(dd2Card)).toBe(22);
 
     const state = makePlayingState({
       roundNumber: 1,
       players: [
-        { id: 'p1', name: 'Andi', columns: [makeCol('c1', b6, skipCard, true, true)], totalScore: 0, hasFlippedInitial: true, hasCalledUno: false, eliminatedColumnsThisRound: 0, extraColumnsThisRound: 0 }, // 16 pts
+        { id: 'p1', name: 'Andi', columns: [makeCol('c1', b6, skipCard, true, true)], totalScore: 0, hasFlippedInitial: true, hasCalledUno: false, eliminatedColumnsThisRound: 0, extraColumnsThisRound: 0 }, // 6 + 11 = 17 pts
         { id: 'p2', name: 'Budi', columns: [makeCol('b1', r1, b6, true, false)], totalScore: 0, hasFlippedInitial: true, hasCalledUno: false, eliminatedColumnsThisRound: 0, extraColumnsThisRound: 0 }, // 7 pts
         { id: 'p3', name: 'Citra', columns: [makeCol('d1', r1, { id: 'r4', type: 'number', color: 'red', value: 4 }, true, false)], totalScore: 0, hasFlippedInitial: true, hasCalledUno: false, eliminatedColumnsThisRound: 0, extraColumnsThisRound: 0 }, // 0 pts (red match!)
       ],
@@ -216,7 +225,7 @@ describe('Round End, Scoring (0-6 & Action 10pts), and Lowest-Score Starter for 
 
     const ended = finishRound(state, 'p1');
     expect(ended.phase).toBe('round_over');
-    expect(ended.players[0].totalScore).toBe(16);
+    expect(ended.players[0].totalScore).toBe(17);
     expect(ended.players[1].totalScore).toBe(7);
     expect(ended.players[2].totalScore).toBe(0);
     expect(ended.roundHistory[0].lowestRoundPlayerId).toBe('p3');
