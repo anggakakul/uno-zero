@@ -14,6 +14,7 @@ import {
 import { createDeck, recycleDiscardIntoDraw, shuffleDeck } from './deck';
 import {
   calculateGridPoints,
+  canTakeFromDiscardPile,
   countFaceDownCards,
   eliminateMatchingColumns,
   formatCardName,
@@ -345,7 +346,7 @@ export function takeFromPile(
   const player = state.players[state.currentPlayerIndex];
 
   if (source === 'discard') {
-    if (state.discardPile.length === 0) return state;
+    if (!canTakeFromDiscardPile(state.discardPile)) return state;
     const topDiscard = state.discardPile[state.discardPile.length - 1];
     const remainingDiscard = state.discardPile.slice(0, -1);
 

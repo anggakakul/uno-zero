@@ -19,6 +19,7 @@ import { decideAIMove } from '../ai';
 import { createDeck, getDeckTotalCount } from '../deck';
 import {
   calculateGridPoints,
+  canTakeFromDiscardPile,
   countFaceDownCards,
   doColumnCardsMatch,
   eliminateMatchingColumns,
@@ -288,5 +289,60 @@ describe('Smart AI Decisions, UNO Catch, Anti-Cheat Sanitizer & Timeout', () => 
     expect(resolved.phase).toBe('playing');
     expect(resolved.players[1].columns.length).toBe(4);
     expect(resolved.players[2].columns.length).toBe(4);
+  });
+
+  it('forbids taking Action Cards from Discard Pile for both human players and AI', () => {
+    const actionCards: Card[] = [
+      { id: 'a1', type: 'skip', color: 'red' },
+      { id: 'a2', type: 'reverse', color: 'green' },
+      { id: 'a3', type: 'draw2', color: 'blue' },
+      { id: 'a4', type: 'double_draw2', color: 'yellow' },
+    ];
+
+    for (const ac of actionCards) {
+      expect(canTakeFromDiscardPile([ac])).toBe(false);
+
+      const state = makePlayingState({
+        currentPlayerIndex: 0,
+        discardPile: [ac],
+        players: [
+          {
+            id: 'ai1',
+            name: 'Bot Alpha',
+            isAI: true,
+            // Even if color matches an open card in grid, taking Action Card from Discard MUST be blocked!
+            columns: [makeCol('c1', { id: 'm1', type: 'number', color: ac.color, value: 4 }, { id: 'm2', type: 'number', color: 'blue', value: 5 }, true, false)],
+            totalScore: 0,
+            hasFlippedInitial: true,
+            hasCalledUno: false,
+            eliminatedColumnsThisRound: 0,
+            extraColumnsThisRound: 0,
+          },
+          {
+            id: 'p2',
+            name: 'Andi',
+            columns: [makeCol('b1', { id: 'n1', type: 'number', color: 'red', value: 2 }, { id: 'n2', type: 'number', color: 'green', value: 3 }, true, false)],
+            totalScore: 0,
+            hasFlippedInitial: true,
+            hasCalledUno: false,
+            eliminatedColumnsThisRound: 0,
+            extraColumnsThisRound: 0,
+          },
+        ],
+      });
+
+      // Engine blocks taking action card from discard pile
+      const blocked = takeFromPile(state, 'discard');
+      expect(blocked.turnStep).toBe('choose_source');
+      expect(blocked.drawnCard).toBeNull();
+      expect(blocked.discardPile.length).toBe(1);
+
+      // AI must draw from Draw Pile instead
+      const aiMove = decideAIMove(state, seededRng(1));
+      expect(aiMove).toEqual({ action: 'take_source', source: 'draw' });
+    }
+
+    // Number card on top of Discard Pile IS allowed
+    expect(canTakeFromDiscardPile([{ id: 'ok', type: 'number', color: 'red', value: 3 }])).toBe(true);
   });
 });

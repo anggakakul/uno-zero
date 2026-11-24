@@ -7,6 +7,7 @@ import {
   History,
   Home,
   Layers,
+  Lock,
   RotateCcw,
   RotateCw,
   ShieldAlert,
@@ -17,7 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { GameMode, GameState, SlotPosition } from '../types/game';
-import { countFaceDownCards } from '../engine/rules';
+import { canTakeFromDiscardPile, countFaceDownCards, isActionCard } from '../engine/rules';
 import { soundFX } from '../services/sound';
 import { UnoCard } from '../components/UnoCard';
 import { PlayerGrid } from '../components/PlayerGrid';
@@ -139,6 +140,8 @@ export const GamePage: React.FC<GamePageProps> = ({
   const dockFaceDownCount = countFaceDownCards(dockPlayer.columns);
 
   const canChooseSource = isMyTurn && state.phase === 'playing' && state.turnStep === 'choose_source';
+  const discardBlockedByAction = Boolean(topDiscard && isActionCard(topDiscard));
+  const canTakeDiscard = canChooseSource && canTakeFromDiscardPile(state.discardPile);
   const isResolvingDrawn = state.phase === 'playing' && state.turnStep === 'resolve_drawn';
   const isMustFlip = isMyTurn && state.phase === 'playing' && state.turnStep === 'must_flip';
   const isInitialFlip = isMyTurn && state.phase === 'initial_flip';
@@ -189,7 +192,9 @@ export const GamePage: React.FC<GamePageProps> = ({
     : state.phase === 'initial_flip'
     ? `Ketuk 1 kartu TERTUTUP di grid untuk dibuka di awal ronde.`
     : canChooseSource
-    ? `Pilih ambil 1 kartu dari Draw Pile atau Discard Pile.`
+    ? discardBlockedByAction
+      ? `Kartu Aksi di tumpukan buangan tidak dapat diambil — wajib ambil dari Draw Pile.`
+      : `Pilih ambil 1 kartu dari Draw Pile atau Discard Pile.`
     : isResolvingDrawn
     ? state.drawnFrom === 'discard'
       ? `Wajib tukar kartu dari Discard Pile dengan 1 kartu di grid.`
@@ -348,8 +353,10 @@ export const GamePage: React.FC<GamePageProps> = ({
           <div className="flex flex-col items-center gap-1.5">
             <div
               className={`relative p-1.5 rounded-3xl transition ${
-                canChooseSource
+                canTakeDiscard
                   ? 'ring-2 ring-emerald-400/80 bg-emerald-400/10 shadow-[0_0_28px_rgba(52,211,153,0.3)]'
+                  : canChooseSource && discardBlockedByAction
+                  ? 'ring-2 ring-rose-500/60 bg-rose-950/35'
                   : ''
               }`}
             >
@@ -361,15 +368,28 @@ export const GamePage: React.FC<GamePageProps> = ({
                     animate={{ scale: 1, y: 0, rotate: 0, opacity: 1 }}
                     exit={{ scale: 0.88, opacity: 0 }}
                     transition={{ type: 'spring', stiffness: 280, damping: 20 }}
+                    className="relative"
                   >
                     <UnoCard
                       card={topDiscard}
                       size="md"
-                      playable={canChooseSource}
-                      highlighted={canChooseSource}
-                      badgeText={canChooseSource ? 'AMBIL' : undefined}
-                      onClick={canChooseSource ? () => onTakeFromPile('discard') : undefined}
+                      playable={canTakeDiscard}
+                      dimmed={canChooseSource && discardBlockedByAction}
+                      highlighted={canTakeDiscard}
+                      badgeText={canTakeDiscard ? 'AMBIL' : undefined}
+                      onClick={canTakeDiscard ? () => onTakeFromPile('discard') : undefined}
                     />
+                    {canChooseSource && discardBlockedByAction && (
+                      <div
+                        className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl bg-slate-950/45"
+                        title="Kartu Aksi di tumpukan buangan tidak dapat diambil"
+                      >
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-600/95 border border-rose-300/70 text-[10px] font-display font-black text-white shadow-lg">
+                          <Lock className="w-3 h-3" />
+                          TERKUNCI
+                        </span>
+                      </div>
+                    )}
                   </motion.div>
                 </AnimatePresence>
               ) : (
@@ -413,6 +433,14 @@ export const GamePage: React.FC<GamePageProps> = ({
             </motion.div>
           )}
         </div>
+
+        {/* Visual Indicator when Discard Pile is locked because top card is an Action Card */}
+        {canChooseSource && discardBlockedByAction && (
+          <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-950/80 border border-rose-500/60 text-rose-200 text-xs font-bold shadow">
+            <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span>Kartu Aksi di tumpukan buangan tidak dapat diambil — ambil dari Draw Pile.</span>
+          </div>
+        )}
       </main>
 
       {/* Bottom Dock: Main Player Grid + Flanking UNO! & Catch Buttons */}

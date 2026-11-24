@@ -60,7 +60,7 @@ export const HowToPlayPage: React.FC<HowToPlayPageProps> = ({ onBack }) => {
           </h2>
           <ul className="list-disc list-inside space-y-1.5 text-sm text-slate-300">
             <li>Setiap pemain menerima <strong>6 kartu tertutup</strong> dalam formasi <strong>grid 2×3</strong> dan wajib membuka <strong>1 kartu awal</strong>.</li>
-            <li>Ambil 1 kartu dari <strong>Discard Pile</strong> → wajib tukar dengan 1 kartu di grid (terbuka/tertutup), kartu lama dibuang terbuka ke Discard Pile.</li>
+            <li>Ambil 1 kartu dari <strong>Discard Pile</strong> → wajib tukar dengan 1 kartu di grid (terbuka/tertutup), kartu lama dibuang terbuka ke Discard Pile. <strong>Larangan:</strong> jika kartu teratas Discard Pile adalah <strong>Kartu Aksi</strong> (Skip, Reverse, Draw Two, Double Draw Two), kartu tersebut <strong>tidak dapat diambil</strong>—pemain wajib mengambil dari Draw Pile.</li>
             <li>Ambil 1 kartu dari <strong>Draw Pile</strong> → boleh tukar dengan 1 kartu di grid, <strong>atau</strong> langsung buang ke Discard Pile lalu wajib membuka 1 kartu tertutup.</li>
             <li>Jika Draw Pile habis, seluruh Discard Pile (kecuali kartu teratas) dikocok ulang otomatis.</li>
           </ul>

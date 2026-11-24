@@ -1,5 +1,6 @@
 import { Card, GameState, GridColumn, SlotPosition } from '../types/game';
 import {
+  canTakeFromDiscardPile,
   countFaceDownCards,
   doColumnCardsMatch,
   getCardPoints,
@@ -131,8 +132,8 @@ export function decideAIMove(
   const faceDownCount = countFaceDownCards(aiPlayer.columns);
 
   if (state.turnStep === 'choose_source') {
-    const topDiscard = state.discardPile[state.discardPile.length - 1];
-    if (topDiscard) {
+    if (canTakeFromDiscardPile(state.discardPile)) {
+      const topDiscard = state.discardPile[state.discardPile.length - 1];
       const isLowNumber = topDiscard.type === 'number' && (topDiscard.value ?? 99) <= 2;
       const matchesColumn = Boolean(findColumnMatchSwapSlot(aiPlayer.columns, topDiscard));
       if (isLowNumber || matchesColumn) {

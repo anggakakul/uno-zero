@@ -114,6 +114,16 @@ export function isActionCard(card: Card): boolean {
 }
 
 /**
+ * Official UNO Zero rule:
+ * Players are NOT allowed to take the top card of the Discard Pile if it is an Action Card.
+ */
+export function canTakeFromDiscardPile(discardPile: readonly Card[]): boolean {
+  if (discardPile.length === 0) return false;
+  const top = discardPile[discardPile.length - 1];
+  return !isActionCard(top);
+}
+
+/**
  * Human-readable Indonesian card label for logs and UI.
  */
 export function formatCardName(card: Card): string {
