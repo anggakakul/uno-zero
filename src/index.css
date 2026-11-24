@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: 'Outfit', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom subtle scrollbars */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.card-text-shadow {
+  text-shadow: 0 2.5px 0 rgba(0, 0, 0, 0.35), 0 5px 12px rgba(0, 0, 0, 0.35);
+}
+
+.card-corner-shadow {
+  text-shadow: 0 1.5px 0 rgba(0, 0, 0, 0.45);
+}
+
+/* Modern minimalist-vibrant dark emerald & deep navy matte felt table */
+.table-felt {
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(16, 85, 68, 0.55) 0%, rgba(12, 31, 46, 0.94) 58%, rgba(5, 11, 22, 1) 100%);
+}
+
+/* 3D Card Flip helpers */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
