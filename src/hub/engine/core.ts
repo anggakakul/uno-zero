@@ -175,9 +175,7 @@ export function calculateClassicHandPoints(hand: HubCard[], flipSide: 'light' | 
       t === 'draw2' ||
       t === 'draw5' ||
       t === 'flip' ||
-      t === 'hit2' ||
       t === 'discard_all' ||
-      t === 'clear' ||
       t === 'flex_skip' ||
       t === 'flex_reverse' ||
       t === 'flex_draw2'
@@ -191,10 +189,12 @@ export function calculateClassicHandPoints(hand: HubCard[], flipSide: 'light' | 
   }, 0);
 }
 
-/** Call UNO for a player with 1 or 2 cards */
+/** Call UNO for an active player with 1 or 2 cards (never needed on last card / 0 cards) */
 export function callHubUno(state: HubGameState, playerId: string): HubGameState {
   const player = state.players.find((p) => p.id === playerId);
-  if (!player) return state;
+  if (!player || player.isOut || player.eliminated || player.hand.length === 0 || player.hand.length > 2) {
+    return state;
+  }
   const players = state.players.map((p) =>
     p.id === playerId ? { ...p, calledUno: true } : p
   );
@@ -263,10 +263,6 @@ export function transitionTurnWithPrivacy(
     currentPlayerIndex: nextIndex,
     hasDrawnThisTurn: false,
     phase: needsPassScreen ? 'pass_device' : state.phase,
-    turnTimerSeconds:
-      state.variantId === 'uno-triple-play' && state.settings.triplePlayMode === 'timer'
-        ? 7
-        : state.turnTimerSeconds,
   };
 }
 

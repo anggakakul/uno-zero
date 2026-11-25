@@ -6,17 +6,8 @@ export type VariantId =
   | 'uno-all-wild'
   | 'uno-no-mercy'
   | 'uno-teams'
-  | 'uno-attack'
-  | 'uno-triple-play'
-  | 'uno-junior'
   | 'uno-party'
-  | 'uno-golf'
   | 'uno-liars'
-  | 'uno-house-remix'
-  | 'uno-dare-emoji'
-  | 'uno-express'
-  | 'uno-rummy-up'
-  | 'uno-hearts'
   | 'dos-mode'
   | 'ono-99';
 
@@ -29,21 +20,11 @@ export type AddOnPackId =
   | 'comeback-pack'
   | 'frenemies-pack';
 
-export type DigitalToolId =
-  | 'uno-spin'
-  | 'uno-tippo'
-  | 'uno-jackpot'
-  | 'uno-power-grab'
-  | 'uno-roboto-flash'
-  | 'uno-blast';
-
 export type GameCategory =
   | 'CLASSIC UNO'
   | 'STRATEGY UNO'
   | 'ACTION UNO'
   | 'TEAM UNO'
-  | 'FAMILY UNO'
-  | 'SPECIAL UNO'
   | 'PARTY & SOCIAL'
   | 'SPINOFF';
 
@@ -70,19 +51,13 @@ export type HubCardType =
   | 'reverse'
   | 'draw1'
   | 'draw2'
-  | 'double_draw2'
   | 'draw4'
   | 'draw5'
   | 'draw6'
   | 'draw10'
-  | 'hit2'
   | 'discard_all'
-  | 'discard_two'
   | 'flip'
-  | 'clear'
   | 'wild'
-  | 'wild_clear'
-  | 'wild_give_away'
   | 'wild_draw2'
   | 'wild_draw4'
   | 'wild_draw6'
@@ -99,35 +74,14 @@ export type HubCardType =
   | 'wild_all_flip'
   | 'wild_team_play'
   | 'wild_team_draw4'
-  | 'wild_attack_attack'
-  | 'wild_hit4'
-  | 'trade_hands'
-  | 'wild_all_hit'
-  | 'wild_hit_fire'
   | 'flex_skip'
   | 'flex_reverse'
   | 'flex_draw2'
-  // New Mode Cards
+  // Party & Liar's Mode Cards
   | 'point_taken'
   | 'drawn_together'
   | 'wild_pile_up'
   | 'wild_liars_challenge'
-  | 'wild_express_swap'
-  | 'wild_skip_all'
-  | 'hazard5'
-  | 'wild_shift'
-  | 'tactical_swap'
-  | 'wild_game_changer'
-  | 'add_a_rule'
-  | 'dare_card'
-  | 'wild_dare'
-  | 'wild_emoji'
-  | 'wild_customizable'
-  | 'emoji_card'
-  // Digital Tool Cards
-  | 'spin_card'
-  | 'jackpot_card'
-  | 'power_grab'
   // Add-On Pack Cards (16 cards per pack)
   | 'reverse_draw2'
   | 'double_reverse'
@@ -157,10 +111,9 @@ export type HubCardType =
   | 'frenemy_alliance'
   | 'frenemy_betrayal'
   | 'wild_double_agent'
-  // DOS & Rummy Special Cards
+  // DOS Special Cards
   | 'wild_dos'
   | 'wild_number'
-  | 'wild_rummy'
   // ONO 99 Cards
   | 'ono_minus10'
   | 'ono_hold'
@@ -171,8 +124,6 @@ export interface CardFace {
   color: HubCardColor;
   type: HubCardType;
   value?: number;
-  animal?: string;
-  animalName?: string;
 }
 
 export interface HubCard {
@@ -188,24 +139,10 @@ export interface HubCard {
   hasPassSymbol?: boolean;
   /** Liar's UNO: true = Liar's Card (always played face-down); false = Regular Card (face-up) */
   isLiarsCard?: boolean;
-  /** UNO House Rules: speech bubble icon indicating Add-a-Rule trigger number */
-  hasRuleBubble?: boolean;
-  /** UNO Dare! & Emoji: dare number (1-10) & emoji face metadata */
-  dareNumber?: number;
-  emoji?: string;
-  emojiLabel?: string;
-  /** UNO Rummy-Up: true once a Word/Wild tile has settled on the table (effect inactive thereafter) */
-  rummyEffectConsumed?: boolean;
-  animal?: string;
-  animalName?: string;
-  /** Optional Remix Legacy modification label */
-  remixTag?: string;
   /** Optional pack origin badge */
   packId?: AddOnPackId;
   /** Comeback Pack corner letter for U-N-O combo */
   unoLetter?: 'U' | 'N' | 'O';
-  /** Optional tool origin badge */
-  toolId?: DigitalToolId;
 }
 
 export interface HubPlayer {
@@ -220,16 +157,8 @@ export interface HubPlayer {
   eliminated?: boolean;
   teamId?: number;
   isOut?: boolean;
-  /** UNO Golf grid (6 slots) */
-  golfSlots?: { card: HubCard; faceUp: boolean }[];
-  /** UNO Hearts tricks penalty points this round */
-  heartsPenalty?: number;
-  /** UNO Hearts collected cards this round (for Shooting the Moon check) */
-  heartsCollected?: HubCard[];
   /** ONO 99 lives/chips (starts at 3) */
   onoChips?: number;
-  /** UNO Rummy-Up whether player completed initial >= 15pt meld */
-  hasOpenedMeld?: boolean;
   /** Defense Pack Wild Fortress immunity turns remaining */
   fortressTurns?: number;
 }
@@ -249,17 +178,6 @@ export type HubGamePhase =
   | 'flex_challenge'
   | 'party_wild4_challenge'
   | 'party_pile_up'
-  | 'golf_double_draw2'
-  | 'dare_prompt'
-  | 'wild_dare_pick'
-  | 'wild_emoji_pick'
-  | 'wild_custom_rule'
-  | 'add_rule_prompt'
-  | 'house_rule_qte'
-  | 'house_wild4_challenge'
-  | 'house_game_changer'
-  | 'rummy_choose_effect'
-  | 'remix_upgrade'
   | 'round_over'
   | 'game_over';
 
@@ -268,8 +186,6 @@ export type PendingPromptType =
   | 'target_swap'
   | 'target_draw2'
   | 'target_draw4'
-  | 'target_attack'
-  | 'target_give_away'
   | 'target_point_taken'
   | 'target_drawn_together'
   | 'target_alliance'
@@ -281,17 +197,7 @@ export type PendingPromptType =
   | 'liars_wild_challenge'
   | 'flip_wild_challenge'
   | 'flex_wild4_challenge'
-  | 'party_wild4_challenge'
-  | 'golf_double_draw2'
-  | 'dare_action'
-  | 'wild_dare_pick'
-  | 'wild_emoji_pick'
-  | 'wild_custom_rule'
-  | 'add_rule'
-  | 'house_wild4_challenge'
-  | 'house_game_changer'
-  | 'rummy_choose_effect'
-  | 'remix_pick';
+  | 'party_wild4_challenge';
 
 export interface PendingPrompt {
   type: PendingPromptType;
@@ -300,44 +206,6 @@ export interface PendingPrompt {
   pileIndex?: number;
   useFlex?: boolean;
   message: string;
-}
-
-export interface TriplePlayPile {
-  id: number;
-  cards: HubCard[];
-  activeColor: HubCardColor;
-  lit: boolean;
-  pressure: number;
-  overloadThreshold: number;
-}
-
-export interface AttackLauncherResult {
-  triggeredBy: string;
-  cardsLaunched: number;
-  presses: number;
-  halfStuck?: boolean;
-  timestamp: number;
-}
-
-export interface DigitalToolState {
-  /** UNO Spin last wheel outcome */
-  lastSpin?: { label: string; effect: string; timestamp: number } | null;
-  /** UNO Tippo 2-side balance weights & secret tipping threshold (5-8) */
-  tippoLeftWeight: number;
-  tippoRightWeight: number;
-  tippoThreshold?: number;
-  tippoTippedBy?: string | null;
-  /** UNO Wild Jackpot 3-reel result */
-  lastJackpot?: { reels: [string, string, string]; outcome: string; timestamp: number } | null;
-  /** UNO Power Grab current token holder playerId & 4-Relic U-N-O-! map */
-  powerHolderId?: string | null;
-  powerRelics?: Record<'U' | 'N' | 'O' | '!', string | null>;
-  /** UNO Roboto active sudden rule */
-  robotoRule?: { targetName: string; ruleText: string; timestamp: number } | null;
-  /** UNO Flash reflex prompt */
-  flashActive?: { targetPlayerId: string; secondsLeft: number } | null;
-  /** UNO Blast extreme No Mercy Attack toggle */
-  blastNoMercyExtreme?: boolean;
 }
 
 export interface FlexChallengeState {
@@ -388,71 +256,6 @@ export interface WildLiarsChallengeState {
   }[];
 }
 
-export interface HouseRuleSlot {
-  slotIndex: number;
-  triggerNumber: number;
-  title: string;
-  actionLabel: string;
-  createdBy: string;
-}
-
-export interface ActiveRuleQTE {
-  rule: HouseRuleSlot;
-  triggeredBy: string;
-  completedPlayerIds: string[];
-  startedAt: number;
-}
-
-export interface HouseRemixConfig {
-  stackingMode: 'off' | 'same_type' | 'mixed';
-  reverseOnDraw: boolean;
-  zeroHandSwapMode: 'off' | 'pass_left' | 'choose_target';
-  multiCardPlay: boolean;
-  speedJumpIn: boolean;
-  maxHouseRules: number;
-}
-
-export interface AITrackingMemory {
-  colorPlayCounts: Record<string, Partial<Record<HubCardColor, number>>>;
-  colorDrawFailures: Record<string, Partial<Record<HubCardColor, number>>>;
-}
-
-export type DareCategory = 'family' | 'showoff' | 'daredevil' | 'custom';
-
-export interface DarePromptState {
-  targetId: string;
-  targetName: string;
-  dareNumber: number;
-  dareText: string;
-  penaltyDraw: number;
-  /** True if target also has active Emoji Hold (Combo Lock: fail = +4 cards!) */
-  comboLock?: boolean;
-}
-
-export interface EmojiChallengeState {
-  targetId: string;
-  targetName: string;
-  emoji: string;
-  label: string;
-  maintained: boolean;
-}
-
-export interface RummyMeld {
-  id: string;
-  ownerName: string;
-  kind: 'set' | 'run' | 'starting_single';
-  cards: HubCard[];
-}
-
-export interface RummyTurnTransaction {
-  actorId: string;
-  snapshotMelds: RummyMeld[];
-  snapshotHand: HubCard[];
-  rackTileIdsPlayed: string[];
-  pendingSubstitutedWildIds: string[];
-  triggeredActionTiles: HubCard[];
-}
-
 export interface DosTurnState {
   matchedPileIndices: number[];
   matchedHandCards: HubCard[];
@@ -462,12 +265,6 @@ export interface DosTurnState {
   stage: 'matching' | 'discard_to_center';
 }
 
-export interface HeartsTrickPlay {
-  playerId: string;
-  playerName: string;
-  card: HubCard;
-}
-
 export interface HubEvent {
   id: string;
   type: string;
@@ -475,36 +272,31 @@ export interface HubEvent {
   timestamp: number;
 }
 
+export type WinConditionMode = 'classic_points' | 'quick_single' | 'elimination';
+
+export interface HubRoundStanding {
+  playerId: string;
+  playerName: string;
+  rank: number;
+  status: 'finished' | 'active' | 'eliminated';
+  score: number;
+  handCount: number;
+}
+
 export interface VariantSettings {
   targetScore: number;
   singleRound: boolean;
+  /** Custom Win Condition Mode: classic_points (500pt), quick_single (1 ronde), or elimination (3+ pemain) */
+  winConditionMode?: WinConditionMode;
+  /** Optional Mercy Rule toggle (eliminates player reaching mercyCardLimit cards) */
+  mercyRuleEnabled?: boolean;
+  /** Card limit for optional Mercy Rule (default: 25) */
+  mercyCardLimit?: number;
   strictWildDraw4?: boolean;
-  triplePlayMode?: 'regular' | 'timer';
-  triplePlayScoringMode?: 'classic_500' | 'lowest_at_500';
-  triplePlayPartyRules?: boolean;
-  juniorLevel?: 'beginner' | 'intermediate' | 'advanced';
-  attackIntensity?: 'mild' | 'official' | 'chaos';
-  attackDeckMode?: 'standard' | 'classic';
-  attackScoringMode?: 'classic_500' | 'lowest_at_500';
   /** Enabled Add-On Expansion Packs */
   activePacks?: AddOnPackId[];
-  /** Enabled Digital Table Tools */
-  activeTools?: DigitalToolId[];
-  /** Enable extreme No Mercy Blast */
-  blastExtreme?: boolean;
   /** UNO Flip alternative scoring option */
   flipScoringMode?: 'classic_500' | 'lowest_at_500';
-  /** UNO House Rules & Remix lobby toggle settings */
-  houseRemixConfig?: Partial<HouseRemixConfig>;
-  /** UNO Dare! & Emoji active Dare List category */
-  dareCategory?: DareCategory;
-  /** UNO Express deck & mode options */
-  expressDeckMode?: 'classic_56' | 'plus_60';
-  expressScoringMode?: 'points_250' | 'points_100' | 'first_to_3' | 'knockout_sprint';
-  expressStacking?: boolean;
-  expressTurboMatch?: boolean;
-  /** UNO Rummy-Up scoring mode */
-  rummyScoringMode?: 'points_200' | 'casual_2_rounds' | 'casual_4_rounds';
   /** ONO 99 edition ('2022' official default vs 'classic_1980s') */
   ono99Edition?: '2022' | 'classic_1980s';
 }
@@ -523,6 +315,8 @@ export interface HubRoundSummary {
     eliminated?: boolean;
   }[];
   reason: string;
+  /** Ranked standings for Elimination Mode or Mercy Rule matches */
+  finalStandings?: HubRoundStanding[];
 }
 
 export interface HubGameState {
@@ -540,9 +334,6 @@ export interface HubGameState {
   pendingDrawCount: number;
   pendingDrawMinValue?: number;
   flipSide: 'light' | 'dark';
-  triplePiles?: TriplePlayPile[];
-  turnTimerSeconds?: number;
-  lastAttackResult?: AttackLauncherResult | null;
   pendingPrompt?: PendingPrompt | null;
   unoVulnerablePlayerId?: string | null;
   hasDrawnThisTurn: boolean;
@@ -554,8 +345,6 @@ export interface HubGameState {
   winnerTeamId?: number | null;
   teamScores?: Record<number, number>;
   startedAt: number;
-  /** Digital Table Tools runtime state */
-  toolState?: DigitalToolState;
   /** Frenemies Pack active alliances [playerA, playerB] */
   alliances?: [string, string][];
   /** UNO Party! Wild Pile Up active mini-pile */
@@ -563,27 +352,10 @@ export interface HubGameState {
     cards: HubCard[];
     color: HubCardColor;
   } | null;
-  /** UNO Golf currently held drawn/picked card waiting for swap or discard */
-  golfDrawnCard?: {
-    card: HubCard;
-    source: 'draw' | 'discard';
-  } | null;
   /** UNO Party! Wild Drawn Together linked pair [playerA, playerB] */
   drawnTogetherPair?: [string, string] | null;
   /** Speed Pack / Party speed phase active */
   speedPhaseTurns?: number;
-  /** UNO House Rules active rules list */
-  activeHouseRules?: string[];
-  /** UNO House Rules structured 5-slot rule tracker */
-  houseRuleSlots?: HouseRuleSlot[];
-  /** UNO House Rules active QTE reaction challenge */
-  activeRuleQTE?: ActiveRuleQTE | null;
-  /** UNO House Rules & Remix resolved lobby config */
-  houseRemixConfig?: HouseRemixConfig;
-  /** Strategic AI tracking memory (color plays & draw failures per opponent) */
-  aiMemory?: AITrackingMemory;
-  /** UNO Remix Legacy permanent card modifiers across rounds */
-  remixModifiers?: { cardTypeOrValue: string; bonusEffect: string }[];
   /** UNO No Mercy separate pool for eliminated players' cards (reshuffled only when Draw Pile empties) */
   eliminatedCardsPool?: HubCard[];
   /** Extra consecutive turns remaining for current player (e.g. 2-player UNO All Wild Skip Two) */
@@ -600,17 +372,6 @@ export interface HubGameState {
   wildLiarsChallenge?: WildLiarsChallengeState | null;
   /** Liar's UNO effective top card claim when last played card stayed face-down */
   liarsTopClaim?: { color: HubCardColor; type: HubCardType; value?: number } | null;
-  /** UNO Dare! active dare prompt */
-  darePrompt?: DarePromptState | null;
-  /** UNO Emoji active expression reflex challenge */
-  emojiChallenge?: EmojiChallengeState | null;
-  /** UNO Rummy-Up table melds & active turn transaction */
-  rummyMelds?: RummyMeld[];
-  rummyTransaction?: RummyTurnTransaction | null;
-  /** UNO Hearts current trick plays & lead color */
-  heartsTrick?: HeartsTrickPlay[];
-  heartsLeadColor?: HubCardColor | null;
-  heartsTrickReversed?: boolean;
   /** DOS Mode 2+ active center piles & strict turn-sequence state */
   dosCenterPiles?: HubCard[][];
   dosTurnState?: DosTurnState | null;
@@ -631,6 +392,10 @@ export interface HubGameState {
     chargesLeft: number;
   } | null;
   comebackUnoProgress?: Record<string, ('U' | 'N' | 'O')[]>;
+  /** Elimination Mode finish ranking [1st, 2nd, ...] */
+  finishOrder?: string[];
+  /** Mercy Rule elimination order */
+  eliminatedOrder?: string[];
   /** Server-authoritative turn deadline epoch ms for online matches */
   turnDeadline?: number | null;
 }
@@ -662,7 +427,7 @@ export interface HubResolvePromptPayload {
   passCardId?: string;
   useFlex?: boolean;
   textValue?: string;
-  challengeChoice?: 'trust' | 'challenge' | 'complete_dare' | 'skip_dare';
+  challengeChoice?: 'trust' | 'challenge';
 }
 
 export type HubOnlineAction =
@@ -676,18 +441,7 @@ export type HubOnlineAction =
   | { type: 'challenge_liars' }
   | { type: 'speed_jump_in'; cardId: string }
   | { type: 'party_take_pile_up' }
-  | { type: 'golf_take_draw' }
-  | { type: 'golf_take_discard' }
-  | { type: 'golf_discard_drawn' }
   | { type: 'dos_finish_matching' }
-  | { type: 'rummy_play_meld' }
-  | { type: 'rummy_commit_turn' }
-  | { type: 'rummy_revert_turn' }
-  | { type: 'house_complete_qte' }
-  | { type: 'dare_maintain_emoji' }
-  | { type: 'dare_break_emoji' }
-  | { type: 'tool_flash_reflex' }
-  | { type: 'tool_overcharge_blast'; level: 1 | 2 | 3 }
   | { type: 'pack_comeback_uno_combo' }
   | { type: 'pack_reflex_race_tap' }
   | { type: 'next_round' }
@@ -697,22 +451,14 @@ export interface MoveInput {
   cardId: string;
   /** Optional second cardId for DOS double-card addition */
   secondCardId?: string;
-  /** Optional extra identical cardIds for Multi-Card Play (UNO House Rules & Remix) */
-  extraCardIds?: string[];
-  /** Optional multiple cardIds for Rummy-Up meld */
-  meldCardIds?: string[];
   chosenColor?: HubCardColor;
   targetPlayerId?: string;
   useFlex?: boolean;
   pileIndex?: number;
-  /** Tippo side choice ('left' | 'right') */
-  tippoSide?: 'left' | 'right';
   /** Liar's UNO bluff claim */
   claimedColor?: HubCardColor;
   claimedType?: HubCardType;
   claimedValue?: number;
-  /** Golf slot index to swap */
-  golfSlotIndex?: number;
 }
 
 export interface ValidationResult {
@@ -792,7 +538,7 @@ export interface UnoRuleset {
       passCardId?: string;
       useFlex?: boolean;
       textValue?: string;
-      challengeChoice?: 'trust' | 'challenge' | 'complete_dare' | 'skip_dare';
+      challengeChoice?: 'trust' | 'challenge';
     }
   ): HubGameState;
   decideAIMove(state: HubGameState):
@@ -806,7 +552,7 @@ export interface UnoRuleset {
           secondTargetPlayerId?: string;
           passCardId?: string;
           textValue?: string;
-          challengeChoice?: 'trust' | 'challenge' | 'complete_dare' | 'skip_dare';
+          challengeChoice?: 'trust' | 'challenge';
         };
       };
 }

@@ -1,4 +1,4 @@
-import { AddOnPackId, DigitalToolId } from '../types';
+import { AddOnPackId } from '../types';
 
 export interface AddOnPackInfo {
   id: AddOnPackId;
@@ -9,22 +9,13 @@ export interface AddOnPackInfo {
   accent: string;
 }
 
-export interface DigitalToolInfo {
-  id: DigitalToolId;
-  name: string;
-  shortTag: string;
-  description: string;
-  mechanicSummary: string;
-  accent: string;
-}
-
 export const ADDON_PACKS_CATALOG: AddOnPackInfo[] = [
   {
     id: 'reverse-pack',
     name: 'Reverse Pack (16 Kartu)',
     shortTag: 'MANIPULASI ARAH',
     description:
-      '16 kartu manipulasi arah & giliran: 8× Reverse Draw 2, 4× Double Reverse (Boomerang — giliran ekstra!), dan 4× Wild Reverse All-Skip!',
+      '16 kartu manipulasi arah dan giliran: 8× Reverse Draw 2, 4× Double Reverse (Boomerang: giliran ekstra), dan 4× Wild Reverse All-Skip.',
     cardsAdded: ['8× Reverse Draw 2', '4× Double Reverse', '4× Wild Reverse All-Skip'],
     accent: 'from-cyan-400 to-blue-600',
   },
@@ -81,62 +72,5 @@ export const ADDON_PACKS_CATALOG: AddOnPackInfo[] = [
       '16 kartu politik meja: 8× Pact/Alliance (sekutu ikut buang kartu angka sama), 4× Betrayal/Backstab (putus aliansi +3 kartu!), dan 4× Wild Double Agent (ikat 2 lawan)!',
     cardsAdded: ['8× Pact/Alliance', '4× Betrayal (+3)', '4× Wild Double Agent'],
     accent: 'from-pink-500 to-rose-600',
-  },
-];
-
-export const DIGITAL_TOOLS_CATALOG: DigitalToolInfo[] = [
-  {
-    id: 'uno-spin',
-    name: 'UNO Spin Wheel',
-    shortTag: 'RODA PUTAR ACAK',
-    description:
-      'Menambahkan kartu SPIN & animasi Roda Putar di tengah meja yang memicu efek acak (Buang 1 Warna, Tukar Tangan, Perang Angka Tertinggi, dll.).',
-    mechanicSummary: 'Mainkan kartu SPIN → Roda berputar otomatis dan menjalankan efek meja!',
-    accent: 'from-fuchsia-500 to-indigo-600',
-  },
-  {
-    id: 'uno-tippo',
-    name: 'UNO Tippo Seesaw',
-    shortTag: 'BOBOT 1–4 • BATAS 5–8',
-    description:
-      'Papan jungkat-jungkit dengan 2 tumpukan (Kiri & Kanan). Bobot: Angka 0–4 = 1, Angka 5–9 = 2, Aksi = 3, Wild = 4. Jika selisih > batas kritis (5–8), papan jatuh (+3 kartu)!',
-    mechanicSummary: 'Jaga selisih |Kiri - Kanan| ≤ batas kritis agar papan tidak jatuh!',
-    accent: 'from-amber-400 to-red-500',
-  },
-  {
-    id: 'uno-jackpot',
-    name: 'UNO Wild Jackpot',
-    shortTag: 'MESIN SLOT 3-REEL',
-    description:
-      'Mesin slot mini 3-reel di meja yang berputar otomatis saat kartu Jackpot dimainkan untuk menentukan hadiah (buang kartu) atau hukuman acak!',
-    mechanicSummary: '3 simbol kembar = JACKPOT (buang 2 kartu gratis)!',
-    accent: 'from-yellow-400 to-orange-500',
-  },
-  {
-    id: 'uno-power-grab',
-    name: 'UNO Power Grab',
-    shortTag: 'TOKEN KEBAL AKSI',
-    description:
-      'Token Power di tengah meja yang dapat direbut dengan kartu Power Grab. Pemegang status Power KEBAL terhadap semua kartu aksi lawan!',
-    mechanicSummary: 'Rebut Token Power → Kebal dari Skip, Draw, dan serangan lawan!',
-    accent: 'from-emerald-400 to-cyan-500',
-  },
-  {
-    id: 'uno-roboto-flash',
-    name: 'UNO Roboto & Flash',
-    shortTag: 'ROBOT + REFLEKS',
-    description:
-      'Asisten virtual Roboto memberi aturan dadakan di tengah giliran + lampu indikator Flash menuntut refleks cepat menekan tombol aksi!',
-    mechanicSummary: 'Tekan tombol FLASH REFLEX saat lampu menyala atau kena penalti +2 kartu!',
-    accent: 'from-sky-400 to-violet-600',
-  },
-  {
-    id: 'uno-blast',
-    name: 'UNO Blast / No Mercy Attack!',
-    shortTag: 'PELUNCUR VIRTUAL',
-    description:
-      'Mengganti Draw Pile biasa dengan Peluncur Kartu Virtual yang menembakkan 0 hingga banyak kartu sekaligus (dengan opsi No Mercy Extreme!).',
-    mechanicSummary: 'Tekan tombol BLAST saat ambil kartu; siap-siap ledakan kartu acak!',
-    accent: 'from-orange-500 to-rose-700',
   },
 ];

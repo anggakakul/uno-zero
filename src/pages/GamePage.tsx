@@ -1,17 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
+  ArrowLeft,
+  BookOpen,
   ClipboardList,
   Clock,
   EyeOff,
   History,
-  Home,
   Layers,
   Lock,
+  Megaphone,
   RotateCcw,
   RotateCw,
   ShieldAlert,
-  Sparkles,
   Trash2,
   Volume2,
   VolumeX,
@@ -19,6 +20,7 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
+import { getModeTheme } from '../hub/themes/modeThemes';
 import { GameMode, GameState, OnlinePlayerNotice, SlotPosition } from '../types/game';
 import { canTakeFromDiscardPile, countFaceDownCards, isActionCard } from '../engine/rules';
 import { soundFX } from '../services/sound';
@@ -45,6 +47,7 @@ interface GamePageProps {
   onResolveDoubleDrawTwo: (targetIds: string[]) => void;
   onCallUno: () => void;
   onCatchUno: () => void;
+  onOpenGuide?: () => void;
   onExitToMenu: () => void;
 }
 
@@ -63,14 +66,29 @@ export const GamePage: React.FC<GamePageProps> = ({
   onResolveDoubleDrawTwo,
   onCallUno,
   onCatchUno,
+  onOpenGuide,
   onExitToMenu,
 }) => {
+  const modeTheme = getModeTheme('uno-zero');
   const [showScorepad, setShowScorepad] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [inspectPlayerId, setInspectPlayerId] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [muted, setMuted] = useState<boolean>(() => soundFX.isMuted());
   const lastSoundEventIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!showScorepad && !showLog && !inspectPlayerId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowScorepad(false);
+        setShowLog(false);
+        setInspectPlayerId(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showScorepad, showLog, inspectPlayerId]);
 
   // Trigger Web Audio SFX reactively on each new game event
   useEffect(() => {
@@ -199,7 +217,7 @@ export const GamePage: React.FC<GamePageProps> = ({
     ? `Ketuk 1 kartu TERTUTUP di grid untuk dibuka di awal ronde.`
     : canChooseSource
     ? discardBlockedByAction
-      ? `Kartu Aksi di tumpukan buangan tidak dapat diambil — wajib ambil dari Draw Pile.`
+      ? `Kartu Aksi di tumpukan buangan tidak dapat diambil, wajib ambil dari Draw Pile.`
       : `Pilih ambil 1 kartu dari Draw Pile atau Discard Pile.`
     : isResolvingDrawn
     ? state.drawnFrom === 'discard'
@@ -210,117 +228,130 @@ export const GamePage: React.FC<GamePageProps> = ({
     : '';
 
   return (
-    <div className="min-h-screen table-felt flex flex-col justify-between text-slate-100 relative overflow-x-hidden">
-      {/* Dramatic Center Action Pop-up Banner */}
+    <div className={`min-h-screen ${modeTheme.tableClass} flex flex-col justify-between text-slate-100 relative overflow-x-hidden`}>
       <ActionOverlayBanner event={state.lastEvent} />
 
-      {/* Top Navigation & Controls Bar */}
-      <header className="w-full px-3 sm:px-5 py-2 bg-slate-950/80 backdrop-blur-md border-b border-emerald-500/15 flex items-center justify-between gap-2 z-20">
-        <div className="flex items-center gap-2">
+      <header className={`relative z-20 px-3 sm:px-6 py-2.5 ${modeTheme.headerBgClass} border-b ${modeTheme.headerBorderClass} flex items-center justify-between gap-2`}>
+        <div className="flex items-center gap-2 min-w-0">
           <button
             type="button"
             onClick={onExitToMenu}
-            className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 cursor-pointer"
-            title="Menu Utama"
+            aria-label="Kembali ke UNO Game Hub"
+            title="Kembali ke UNO Game Hub"
+            className="min-h-11 min-w-11 shrink-0 p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-100 flex items-center justify-center transition"
           >
-            <Home className="w-4 h-4" />
+            <ArrowLeft className="w-4 h-4" />
           </button>
-          <div>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="font-display font-black italic text-sm sm:text-base text-white">
-                UNO <span className="text-amber-400">ZERO</span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              <span className="font-display font-black italic text-sm sm:text-base text-white truncate">
+                UNO ZERO
               </span>
-              <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-[11px] font-black text-amber-300">
-                R{state.roundNumber}/{state.config.totalRounds}
+              <span className={`hidden xs:inline-block px-2 py-0.5 rounded-lg bg-slate-900/90 border ${modeTheme.headerBorderClass} ${modeTheme.accentTextClass} text-[10px] font-display font-black uppercase`}>
+                {modeTheme.signatureTag}
               </span>
               {roomCode && (
-                <span className="px-2 py-0.5 rounded-full bg-sky-500/20 text-[10px] font-black text-sky-300">
-                  {roomCode}
+                <span className="px-2 py-0.5 rounded-lg bg-sky-950/90 border border-sky-400/50 text-sky-200 text-[10px] font-mono font-black">
+                  ROOM: {roomCode}
+                </span>
+              )}
+              {mode === 'online' && (
+                <span
+                  className={`hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                    connectionStatus === 'connected'
+                      ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-400/40'
+                      : connectionStatus === 'reconnecting'
+                      ? 'bg-amber-950/90 text-amber-200 border border-amber-400/40'
+                      : 'bg-rose-950/90 text-rose-200 border border-rose-400/40'
+                  }`}
+                >
+                  {connectionStatus === 'connected' ? (
+                    <Wifi className="w-3 h-3" />
+                  ) : (
+                    <WifiOff className="w-3 h-3" />
+                  )}
+                  {connectionStatus === 'connected'
+                    ? 'Online'
+                    : connectionStatus === 'reconnecting'
+                    ? 'Menghubungkan...'
+                    : 'Offline'}
+                </span>
+              )}
+              {secondsLeft !== null && (
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black tabular-nums ${
+                    secondsLeft <= 5
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-slate-800 text-amber-300'
+                  }`}
+                >
+                  <Clock className="w-3 h-3" />
+                  {secondsLeft}d
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-1 text-[10px] text-slate-400">
-              {state.direction === 1 ? (
-                <>
-                  <RotateCw className="w-3 h-3 text-emerald-400" />
-                  Searah Jarum Jam
-                </>
-              ) : (
-                <>
-                  <RotateCcw className="w-3 h-3 text-violet-400" />
-                  Berlawanan Jarum Jam
-                </>
-              )}
+            <div className="flex items-center gap-2 text-[11px] text-slate-300">
+              <span>Ronde {state.roundNumber}/{state.config.totalRounds}</span>
+              <span>•</span>
+              <span className="inline-flex items-center gap-1">
+                {state.direction === 1 ? (
+                  <>
+                    <RotateCw className="w-3 h-3 text-emerald-400" />
+                    Searah
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-3 h-3 text-violet-400" />
+                    Balik
+                  </>
+                )}
+              </span>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          {mode === 'online' && (
-            <div
-              className={`hidden sm:inline-flex items-center gap-1 px-2 py-1.5 rounded-xl border text-[11px] font-bold ${
-                connectionStatus === 'connected'
-                  ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300'
-                  : connectionStatus === 'reconnecting'
-                  ? 'bg-amber-500/20 border-amber-400/50 text-amber-200 animate-pulse'
-                  : 'bg-rose-500/20 border-rose-400/50 text-rose-200'
-              }`}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {onOpenGuide && (
+            <button
+              type="button"
+              onClick={onOpenGuide}
+              aria-label="Panduan UNO ZERO"
+              title="Panduan UNO ZERO"
+              className="min-h-11 min-w-11 p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 flex items-center justify-center transition"
             >
-              {connectionStatus === 'connected' ? (
-                <Wifi className="w-3.5 h-3.5" />
-              ) : (
-                <WifiOff className="w-3.5 h-3.5" />
-              )}
-              {connectionStatus === 'connected'
-                ? 'Online'
-                : connectionStatus === 'reconnecting'
-                ? 'Reconnecting...'
-                : 'Offline'}
-            </div>
+              <BookOpen className="w-4 h-4 text-sky-400" />
+            </button>
           )}
-          {secondsLeft !== null && (
-            <div
-              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-display font-black ${
-                secondsLeft <= 5
-                  ? 'bg-rose-600/30 border-rose-400 text-rose-200 animate-pulse'
-                  : 'bg-slate-900 border-slate-700 text-amber-300'
-              }`}
-            >
-              <Clock className="w-3.5 h-3.5" />
-              {secondsLeft}d
-            </div>
-          )}
-
-          {/* Speaker Mute / Unmute Button */}
-          <button
-            type="button"
-            onClick={handleToggleMute}
-            className={`p-2 rounded-xl border cursor-pointer transition ${
-              muted
-                ? 'bg-slate-900 border-slate-800 text-slate-500'
-                : 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/25'
-            }`}
-            title={muted ? 'Nyalakan Efek Suara' : 'Bisukan Efek Suara'}
-            aria-label={muted ? 'Nyalakan Efek Suara' : 'Bisukan Efek Suara'}
-          >
-            {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-          </button>
 
           <button
             type="button"
             onClick={() => setShowScorepad(true)}
-            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-bold text-amber-300 cursor-pointer"
+            aria-label="Buka Scorepad"
+            title="Scorepad"
+            className="min-h-11 min-w-11 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-bold text-amber-300 inline-flex items-center justify-center gap-1.5 transition"
           >
             <ClipboardList className="w-4 h-4" />
             <span className="hidden sm:inline">Scorepad</span>
           </button>
+
           <button
             type="button"
             onClick={() => setShowLog(true)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-bold text-sky-300 cursor-pointer"
-            title="Riwayat"
+            aria-label="Buka Riwayat Aksi"
+            title="Riwayat Aksi"
+            className="min-h-11 min-w-11 p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-sky-300 flex items-center justify-center transition"
           >
             <History className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleToggleMute}
+            aria-label={muted ? 'Nyalakan Efek Suara' : 'Bisukan Efek Suara'}
+            title={muted ? 'Nyalakan Efek Suara' : 'Bisukan Efek Suara'}
+            className="min-h-11 min-w-11 p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 flex items-center justify-center transition"
+          >
+            {muted ? <VolumeX className="w-4 h-4 text-slate-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
           </button>
         </div>
       </header>
@@ -347,8 +378,8 @@ export const GamePage: React.FC<GamePageProps> = ({
       {/* Center Table: Draw Pile + Discard Pile + Active Drawn Card */}
       <main className="flex-1 flex flex-col items-center justify-center px-3 py-2 gap-2.5 z-10">
         {onlineNotice && (
-          <div className="max-w-xl w-full text-center px-4 py-1.5 rounded-xl bg-sky-500/20 border border-sky-400/50 text-xs font-bold text-sky-100">
-            🔔 {onlineNotice.message}
+          <div className="max-w-xl w-full text-center px-4 py-1.5 rounded-xl bg-sky-950/90 border border-sky-400/50 text-xs font-bold text-sky-100">
+            {onlineNotice.message}
           </div>
         )}
         <div className="max-w-xl w-full flex justify-center min-h-[36px]">
@@ -471,15 +502,15 @@ export const GamePage: React.FC<GamePageProps> = ({
         {canChooseSource && discardBlockedByAction && (
           <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-rose-950/80 border border-rose-500/60 text-rose-200 text-xs font-bold shadow">
             <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-            <span>Kartu Aksi di tumpukan buangan tidak dapat diambil — ambil dari Draw Pile.</span>
+            <span>Kartu Aksi di tumpukan buangan tidak dapat diambil: ambil dari Draw Pile.</span>
           </div>
         )}
       </main>
 
-      {/* Bottom Dock: Main Player Grid + Flanking UNO! & Catch Buttons */}
       <section
-        className={`w-full bg-slate-950/85 backdrop-blur-lg border-t px-2.5 sm:px-5 pt-2.5 pb-4 z-20 transition ${
-          isMyTurn ? 'border-amber-400/50 shadow-[0_-8px_32px_rgba(251,191,36,0.12)]' : 'border-slate-800/90'
+        aria-label="Grid kartu pemain"
+        className={`w-full bg-slate-950/95 border-t px-2.5 sm:px-5 pt-2.5 pb-4 z-20 transition ${
+          isMyTurn ? 'border-amber-400/50' : 'border-slate-800'
         }`}
       >
         <div className="max-w-5xl mx-auto space-y-2">
@@ -510,7 +541,7 @@ export const GamePage: React.FC<GamePageProps> = ({
                 <button
                   type="button"
                   onClick={onCatchUno}
-                  className="px-4 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-display font-black text-xs sm:text-sm flex items-center gap-2 shadow-xl shadow-rose-600/40 animate-pulse cursor-pointer transition active:scale-95"
+                  className="px-4 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-display font-black text-xs sm:text-sm flex items-center gap-2 shadow-xl shadow-rose-600/40 cursor-pointer transition active:scale-95"
                 >
                   <ShieldAlert className="w-5 h-5" />
                   TANTANG / CATCH! ({state.unoVulnerability.playerName})
@@ -529,21 +560,20 @@ export const GamePage: React.FC<GamePageProps> = ({
               />
             </div>
 
-            {/* Right Side: UNO! Button */}
             {showUnoButton && (
               <div className="shrink-0 order-1 md:order-3">
                 <button
                   type="button"
                   onClick={onCallUno}
                   disabled={isMyTurn && state.unoArmed && !amVulnerable}
-                  className={`px-6 py-3.5 rounded-2xl font-display font-black text-base tracking-wide flex items-center gap-2 shadow-xl transition active:scale-95 ${
+                  className={`min-h-12 px-6 py-3 rounded-xl font-display font-black text-base tracking-wide flex items-center gap-2 transition active:scale-95 ${
                     isMyTurn && state.unoArmed && !amVulnerable
-                      ? 'bg-emerald-500/30 border-2 border-emerald-400 text-emerald-200 cursor-default'
-                      : 'bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 hover:from-amber-300 hover:to-rose-400 text-slate-950 shadow-orange-500/40 animate-bounce cursor-pointer'
+                      ? 'bg-emerald-950/80 border-2 border-emerald-400 text-emerald-200 cursor-default'
+                      : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
                   }`}
                 >
-                  <Sparkles className="w-5 h-5" />
-                  {isMyTurn && state.unoArmed && !amVulnerable ? 'UNO! ✓' : 'UNO!'}
+                  <Megaphone className="w-5 h-5" />
+                  {isMyTurn && state.unoArmed && !amVulnerable ? 'UNO Aktif' : 'UNO!'}
                 </button>
               </div>
             )}
@@ -551,7 +581,6 @@ export const GamePage: React.FC<GamePageProps> = ({
         </div>
       </section>
 
-      {/* Double Draw Two Target Modal */}
       {isMyTurn && state.phase === 'choose_double_draw2_target' && (
         <DoubleDrawTwoModal
           actorName={activePlayer.name}
@@ -560,24 +589,29 @@ export const GamePage: React.FC<GamePageProps> = ({
         />
       )}
 
-      {/* Opponent Grid Zoom Inspector Modal */}
       {inspectedPlayer && (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl rounded-3xl bg-slate-900 border border-slate-700 p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Inspeksi grid ${inspectedPlayer.name}`}
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div className="w-full max-w-2xl rounded-2xl bg-slate-900 border border-slate-700 p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between gap-2">
               <div>
                 <h3 className="font-display text-lg font-black text-white">
                   Grid {inspectedPlayer.name} (2×{inspectedPlayer.columns.length})
                 </h3>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-300">
                   Total Skor: {inspectedPlayer.totalScore} • Kartu tertutup:{' '}
                   {countFaceDownCards(inspectedPlayer.columns)}
                 </p>
               </div>
               <button
                 type="button"
+                aria-label="Tutup inspeksi grid"
                 onClick={() => setInspectPlayerId(null)}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                className="min-h-11 min-w-11 p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center transition"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -592,15 +626,19 @@ export const GamePage: React.FC<GamePageProps> = ({
         </div>
       )}
 
-      {/* Scorepad Modal */}
       {showScorepad && (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Scorepad UNO ZERO"
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+        >
           <div className="w-full max-w-4xl max-h-[88vh] overflow-y-auto space-y-3">
             <div className="flex justify-end">
               <button
                 type="button"
                 onClick={() => setShowScorepad(false)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm cursor-pointer"
+                className="min-h-11 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm transition"
               >
                 <X className="w-4 h-4" />
                 Tutup Scorepad
@@ -616,19 +654,24 @@ export const GamePage: React.FC<GamePageProps> = ({
         </div>
       )}
 
-      {/* Action History Modal */}
       {showLog && (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="w-full max-w-lg max-h-[80vh] rounded-3xl bg-slate-900 border border-slate-700 p-5 flex flex-col gap-4 shadow-2xl">
-            <div className="flex items-center justify-between">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Riwayat permainan"
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div className="w-full max-w-lg max-h-[80vh] rounded-2xl bg-slate-900 border border-slate-700 p-5 flex flex-col gap-4 shadow-2xl">
+            <div className="flex items-center justify-between gap-2">
               <h3 className="font-display text-lg font-black text-white flex items-center gap-2">
                 <History className="w-5 h-5 text-sky-400" />
                 Riwayat Permainan
               </h3>
               <button
                 type="button"
+                aria-label="Tutup riwayat permainan"
                 onClick={() => setShowLog(false)}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                className="min-h-11 min-w-11 p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center transition"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -637,7 +680,7 @@ export const GamePage: React.FC<GamePageProps> = ({
               {state.actionLog.map((evt) => (
                 <div
                   key={evt.id}
-                  className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800 text-xs sm:text-sm text-slate-200"
+                  className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs sm:text-sm text-slate-200"
                 >
                   {evt.message}
                 </div>

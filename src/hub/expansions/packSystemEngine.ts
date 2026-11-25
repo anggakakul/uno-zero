@@ -115,8 +115,8 @@ export interface PenaltyChainState {
 
 /**
  * 4-Tier Priority Stack / Chain Resolution:
- * - Tier 1: Hard Block / Rebound (+1 & bounce) / Wild No U (bounce without +1) — capped at MAX_CHAIN_BOUNCES (2x)!
- * - Tier 2: Draw Stacking — capped at MAX_PENALTY_STACK (+16)!
+ * - Tier 1: Hard Block / Rebound (+1 & bounce) / Wild No U (bounce without +1): capped at MAX_CHAIN_BOUNCES (2x)!
+ * - Tier 2: Draw Stacking: capped at MAX_PENALTY_STACK (+16)!
  */
 export function applyChainReaction(
   chain: PenaltyChainState,

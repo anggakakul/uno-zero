@@ -727,7 +727,7 @@ export const unoTeamsRuleset: UnoRuleset = {
           : `↔️ PASSING SYMBOL! ${actor.name} & ${partner.name} saling bertukar 1 kartu secara bersamaan!`
       );
 
-      // On Initial Pass, do NOT advance turn — turn 1 belongs to starterIdx (left of dealer)!
+      // On Initial Pass, do NOT advance turn: turn 1 belongs to starterIdx (left of dealer)!
       if (isInitialPass) return nextState;
       return this.advanceTurn(nextState, 1);
     }

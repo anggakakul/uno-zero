@@ -13,26 +13,14 @@ import {
 import { calculateAllWildHandPoints, unoAllWildRuleset } from '../rulesets/unoAllWild';
 import { MERCY_LIMIT, calculateNoMercyHandPoints, unoNoMercyRuleset } from '../rulesets/unoNoMercy';
 import { calculateTeamsHandPoints, unoTeamsRuleset } from '../rulesets/unoTeams';
-import {
-  calculateAttackHandPoints,
-  catchAttackUno,
-  simulateLauncherPresses,
-  unoAttackRuleset,
-} from '../rulesets/unoAttack';
-import {
-  calculateTriplePlayHandPoints,
-  handleTriplePlayTimeout,
-  unoTriplePlayRuleset,
-} from '../rulesets/unoTriplePlay';
-import { juniorCardMatches, passAfterJuniorDraw, unoJuniorRuleset } from '../rulesets/unoJunior';
 
-describe('UNO GAME HUB — Multi-Variant Ruleset Suite', () => {
-  it('registers all 20 UNO variants in catalog and 19 wrapped rulesets in registry', () => {
-    expect(VARIANT_CATALOG).toHaveLength(20);
-    expect(Object.keys(RULESET_REGISTRY)).toHaveLength(19);
+describe('UNO GAME HUB: Multi-Variant Ruleset Suite', () => {
+  it('registers all 11 UNO variants in catalog and 10 wrapped rulesets in registry', () => {
+    expect(VARIANT_CATALOG).toHaveLength(11);
+    expect(Object.keys(RULESET_REGISTRY)).toHaveLength(10);
   });
 
-  describe('GAME 02 — UNO CLASSIC', () => {
+  describe('GAME 02: UNO CLASSIC', () => {
     it('builds official 108-card deck and deals 7 cards per player', () => {
       const deck = unoClassicRuleset.createDeck({ targetScore: 500, singleRound: false });
       expect(deck).toHaveLength(108);
@@ -74,9 +62,137 @@ describe('UNO GAME HUB — Multi-Variant Ruleset Suite', () => {
       const safeCall = callHubUno(afterPlay, 'p_1');
       expect(safeCall.unoVulnerablePlayerId).toBeNull();
     });
+
+    it('supports Custom Win Modes (Classic + Last-Card +2 scoring, Quick Single, Elimination 3+ with Head-to-Head Reverse) & Optional Mercy Rule', () => {
+      // 1. Classic Point-Based + Last-Card Draw +2 Edge Case (next player draws +2 BEFORE scoring, no UNO required on last card)
+      const p3 = makeDefaultPlayers(['Alice', 'Bob', 'Cara'], 'ai');
+      const classicWrapped = RULESET_REGISTRY['uno-classic'];
+      const baseClassic = classicWrapped.initializeGame(p3, 'ai', {
+        targetScore: 500,
+        singleRound: false,
+        winConditionMode: 'classic_points',
+      });
+      const lastDraw2 = { id: 'ld2', color: 'red' as const, type: 'draw2' as const };
+      const bobCard = { id: 'bc1', color: 'blue' as const, type: 'number' as const, value: 5 };
+      const caraCard = { id: 'cc1', color: 'green' as const, type: 'number' as const, value: 4 };
+      const topTwoDraw = [
+        { id: 'dp1', color: 'yellow' as const, type: 'number' as const, value: 8 },
+        { id: 'dp2', color: 'yellow' as const, type: 'number' as const, value: 7 },
+      ];
+      const prepLastD2 = {
+        ...baseClassic,
+        currentPlayerIndex: 0,
+        activeColor: 'red' as const,
+        drawPile: [...baseClassic.drawPile, ...topTwoDraw],
+        players: [
+          { ...baseClassic.players[0], hand: [lastDraw2], calledUno: false },
+          { ...baseClassic.players[1], hand: [bobCard] },
+          { ...baseClassic.players[2], hand: [caraCard] },
+        ],
+      };
+      const afterLastD2 = classicWrapped.executeAction(prepLastD2, 'p_1', { cardId: 'ld2' });
+      expect(afterLastD2.phase).toBe('round_over');
+      expect(afterLastD2.unoVulnerablePlayerId).toBeNull(); // Last card never requires UNO!
+      expect(afterLastD2.players[1].hand).toHaveLength(3); // Bob drew +2 BEFORE round ended!
+      expect(afterLastD2.players[0].score).toBe(5 + 8 + 7 + 4); // Bob's +2 cards counted in Alice's score!
+
+      // 2. Quick Single-Round (Sudden Death) -> immediate game_over on 1st empty hand
+      const quickState = classicWrapped.initializeGame(p3, 'ai', {
+        targetScore: 500,
+        singleRound: true,
+        winConditionMode: 'quick_single',
+      });
+      const r3 = { id: 'qr3', color: 'red' as const, type: 'number' as const, value: 3 };
+      const afterQuick = classicWrapped.executeAction(
+        {
+          ...quickState,
+          currentPlayerIndex: 0,
+          activeColor: 'red',
+          players: quickState.players.map((p, i) => (i === 0 ? { ...p, hand: [r3] } : p)),
+        },
+        'p_1',
+        { cardId: 'qr3' }
+      );
+      expect(afterQuick.phase).toBe('game_over');
+      expect(afterQuick.winnerId).toBe('p_1');
+
+      // 3. Elimination Mode (3+ players) + Head-to-Head Reverse === Skip when 2 active remain!
+      const elimInit = classicWrapped.initializeGame(p3, 'ai', {
+        targetScore: 500,
+        singleRound: false,
+        winConditionMode: 'elimination',
+      });
+      const bRev = { id: 'brev', color: 'red' as const, type: 'reverse' as const };
+      const bKeep = { id: 'bkeep', color: 'red' as const, type: 'number' as const, value: 6 };
+      const cKeep = { id: 'ckeep', color: 'blue' as const, type: 'number' as const, value: 9 };
+      const elimPrep = {
+        ...elimInit,
+        currentPlayerIndex: 0,
+        activeColor: 'red' as const,
+        players: [
+          { ...elimInit.players[0], hand: [r3] },
+          { ...elimInit.players[1], hand: [bRev, bKeep] },
+          { ...elimInit.players[2], hand: [cKeep] },
+        ],
+      };
+      // Alice empties hand -> Juara #1, game continues with Bob & Cara!
+      const afterAliceOut = classicWrapped.executeAction(elimPrep, 'p_1', { cardId: 'qr3' });
+      expect(afterAliceOut.phase).toBe('playing');
+      expect(afterAliceOut.players[0].isOut).toBe(true);
+      expect(afterAliceOut.finishOrder).toEqual(['p_1']);
+      expect(afterAliceOut.currentPlayerIndex).toBe(1); // Bob's turn!
+
+      // Head-to-Head (2 active left: Bob & Cara): Bob plays Reverse -> acts as Skip (returns to Bob!)
+      const afterBobRev = classicWrapped.executeAction(afterAliceOut, 'p_2', { cardId: 'brev' });
+      expect(afterBobRev.phase).toBe('playing');
+      expect(afterBobRev.currentPlayerIndex).toBe(1); // Skipped Cara, still Bob's turn!
+
+      // Bob plays last card -> Juara #2, only Cara left (Loser) -> game_over with full standings!
+      const afterBobOut = classicWrapped.executeAction(afterBobRev, 'p_2', { cardId: 'bkeep' });
+      expect(afterBobOut.phase).toBe('game_over');
+      expect(afterBobOut.winnerId).toBe('p_1');
+      const standings = afterBobOut.roundHistory[afterBobOut.roundHistory.length - 1].finalStandings!;
+      expect(standings.map((s) => s.playerId)).toEqual(['p_1', 'p_2', 'p_3']);
+      expect(standings[0].rank).toBe(1);
+      expect(standings[1].rank).toBe(2);
+      expect(standings[2].status).toBe('active'); // Cara is the last remaining player (Loser)
+
+      // 4. Optional Mercy Rule Toggle (25 cards) eliminates player on draw!
+      const mercyInit = classicWrapped.initializeGame(
+        makeDefaultPlayers(['A', 'B'], 'ai'),
+        'ai',
+        {
+          targetScore: 500,
+          singleRound: false,
+          winConditionMode: 'classic_points',
+          mercyRuleEnabled: true,
+          mercyCardLimit: 25,
+        }
+      );
+      const twentyFour = Array.from({ length: 24 }, (_, k) => ({
+        id: `m_${k}`,
+        color: 'blue' as const,
+        type: 'number' as const,
+        value: 1,
+      }));
+      const mercyAfterDraw = classicWrapped.handleDrawOrPass(
+        {
+          ...mercyInit,
+          currentPlayerIndex: 0,
+          players: [
+            { ...mercyInit.players[0], hand: twentyFour },
+            mercyInit.players[1],
+          ],
+        },
+        'p_1'
+      );
+      expect(mercyAfterDraw.players[0].eliminated).toBe(true);
+      expect(mercyAfterDraw.phase).toBe('game_over');
+      expect(mercyAfterDraw.winnerId).toBe('p_2');
+    });
   });
 
-  describe('GAME 03 — UNO FLIP! (Official Rules)', () => {
+  describe('GAME 03: UNO FLIP! (Official Rules)', () => {
     it('creates 112 double-sided cards, flips discard pile with Flip card at bottom, and scores officially', () => {
       const deck = unoFlipRuleset.createDeck({ targetScore: 500, singleRound: false });
       expect(deck).toHaveLength(112);
@@ -228,7 +344,7 @@ describe('UNO GAME HUB — Multi-Variant Ruleset Suite', () => {
     });
   });
 
-  describe('GAME 04 — UNO FLEX (Official Rules)', () => {
+  describe('GAME 04: UNO FLEX (Official Rules)', () => {
     it('builds 104 playable + 8 Power Cards (112 total), color-blind notches, and numbered opening card', () => {
       const deck = unoFlexRuleset.createDeck({ targetScore: 500, singleRound: false });
       expect(deck.length + UNO_FLEX_POWER_CARDS_TOTAL).toBe(112);
@@ -338,7 +454,7 @@ describe('UNO GAME HUB — Multi-Variant Ruleset Suite', () => {
     });
   });
 
-  describe('GAME 05 — UNO ALL WILD (Official Rules & Edge Cases)', () => {
+  describe('GAME 05: UNO ALL WILD (Official Rules & Edge Cases)', () => {
     it('builds 112 Wild cards, starts left of dealer, ignores opening action, and scores 20/50', () => {
       const deck = unoAllWildRuleset.createDeck({ targetScore: 500, singleRound: false });
       expect(deck).toHaveLength(112);
@@ -436,7 +552,7 @@ describe('UNO GAME HUB — Multi-Variant Ruleset Suite', () => {
     });
   });
 
-  describe("GAME 06 — UNO SHOW 'EM NO MERCY (Official Rules & Edge Cases)", () => {
+  describe("GAME 06: UNO SHOW 'EM NO MERCY (Official Rules & Edge Cases)", () => {
     it('builds 168 cards, starts left of dealer with numbered card, stacks +4->+6, and isolates eliminatedCardsPool', () => {
       const deck = unoNoMercyRuleset.createDeck({ targetScore: 1000, singleRound: true });
       expect(deck).toHaveLength(168);
@@ -580,7 +696,7 @@ describe('UNO GAME HUB — Multi-Variant Ruleset Suite', () => {
     });
   });
 
-  describe('GAME 07 — UNO TEAMS! (Official Rules & Edge Cases)', () => {
+  describe('GAME 07: UNO TEAMS! (Official Rules & Edge Cases)', () => {
     it('builds 112-card deck, supports 2-4 teams, Initial Pass, Going Out odd-half split & 1-card exception', () => {
       const deck = unoTeamsRuleset.createDeck({ targetScore: 500, singleRound: false });
       expect(deck).toHaveLength(112);
@@ -715,207 +831,6 @@ describe('UNO GAME HUB — Multi-Variant Ruleset Suite', () => {
           { id: 'w', color: 'wild', type: 'wild_team_play' },
         ])
       ).toBe(6 + 20 + 50);
-    });
-  });
-
-  describe('GAME 08 — UNO ATTACK (Balanced RNG, Standard & Classic Modes)', () => {
-    it('builds 112-card Standard & Classic decks, balances 0-12 RNG, blocks Trade Hands as last card, and handles 2p Hit 2 & Wild Hit Fire', () => {
-      const stdDeck = unoAttackRuleset.createDeck({ targetScore: 500, singleRound: false, attackDeckMode: 'standard' });
-      const clsDeck = unoAttackRuleset.createDeck({ targetScore: 500, singleRound: false, attackDeckMode: 'classic' });
-      expect(stdDeck).toHaveLength(112);
-      expect(clsDeck).toHaveLength(112);
-      expect(clsDeck.some((c) => c.type === 'trade_hands')).toBe(true);
-      expect(clsDeck.some((c) => c.type === 'wild_all_hit')).toBe(true);
-      expect(clsDeck.some((c) => c.type === 'wild_hit_fire')).toBe(true);
-
-      // Balanced RNG: safe click (0) vs burst (2..12)
-      expect(simulateLauncherPresses(1, 'official', () => 0.1)).toBe(0);
-      const blast = simulateLauncherPresses(1, 'official', () => 0.99);
-      expect(blast).toBeGreaterThanOrEqual(10);
-      expect(blast).toBeLessThanOrEqual(12);
-
-      // Trade Hands CANNOT be played as the last card!
-      const s2 = unoAttackRuleset.initializeGame(makeDefaultPlayers(['A', 'B'], 'local'), 'local', {
-        targetScore: 500,
-        singleRound: false,
-        attackDeckMode: 'classic',
-      });
-      const tradeCard = { id: 'tr1', color: 'red' as const, type: 'trade_hands' as const };
-      const lastCardTrade = {
-        ...s2,
-        currentPlayerIndex: 0,
-        activeColor: 'red' as const,
-        players: s2.players.map((p, i) => (i === 0 ? { ...p, hand: [tradeCard] } : p)),
-      };
-      expect(unoAttackRuleset.validateMove(lastCardTrade, 'p_1', { cardId: 'tr1' }).valid).toBe(false);
-
-      // 2-player Hit 2 returns turn immediately to actor (index 0)!
-      const hit2 = { id: 'h2', color: 'red' as const, type: 'hit2' as const };
-      const keep = { id: 'k1', color: 'blue' as const, type: 'number' as const, value: 3 };
-      const afterHit2 = unoAttackRuleset.executeAction(
-        { ...s2, currentPlayerIndex: 0, activeColor: 'red' as const, players: s2.players.map((p, i) => (i === 0 ? { ...p, hand: [hit2, keep] } : p)) },
-        'p_1',
-        { cardId: 'h2' }
-      );
-      expect(afterHit2.currentPlayerIndex).toBe(0);
-
-      // Wild Hit Fire forces victim to press until >= 1 card fires!
-      const whf = { id: 'whf', color: 'wild' as const, type: 'wild_hit_fire' as const };
-      const afterFire = unoAttackRuleset.executeAction(
-        { ...s2, currentPlayerIndex: 0, players: s2.players.map((p, i) => (i === 0 ? { ...p, hand: [whf, keep] } : p)) },
-        'p_1',
-        { cardId: 'whf', chosenColor: 'green' }
-      );
-      expect(afterFire.players[1].hand.length).toBeGreaterThan(s2.players[1].hand.length);
-
-      // UNO Catch in UNO Attack presses launcher 2x
-      const caught = catchAttackUno({ ...s2, unoVulnerablePlayerId: 'p_1' }, 'B');
-      expect(caught.lastAttackResult?.presses).toBe(2);
-
-      // Official scoring: Number=face, Rev/Skip/Hit2=20, DiscardAll/TradeHands=30, Wilds=50
-      expect(
-        calculateAttackHandPoints([
-          { id: '1', color: 'red', type: 'number', value: 5 },
-          { id: '2', color: 'red', type: 'hit2' },
-          { id: '3', color: 'blue', type: 'trade_hands' },
-          { id: '4', color: 'wild', type: 'wild_hit_fire' },
-        ])
-      ).toBe(5 + 20 + 30 + 50);
-    });
-  });
-
-  describe('GAME 09 — UNO TRIPLE PLAY (Official 112-Card Rules)', () => {
-    it('builds exact 112-card deck, handles Discard Two, Wild Clear, Wild Give Away, Timeout +6 & 20/30/50 scoring', () => {
-      const deck = unoTriplePlayRuleset.createDeck({ targetScore: 500, singleRound: false });
-      expect(deck).toHaveLength(112);
-      expect(deck.filter((c) => c.type === 'number')).toHaveLength(76);
-      expect(deck.filter((c) => c.type === 'discard_two')).toHaveLength(8);
-      expect(deck.filter((c) => c.type === 'wild_clear')).toHaveLength(4);
-      expect(deck.filter((c) => c.type === 'wild_give_away')).toHaveLength(4);
-
-      const players = makeDefaultPlayers(['A', 'B'], 'local');
-      const state = unoTriplePlayRuleset.initializeGame(players, 'local', {
-        targetScore: 500,
-        singleRound: false,
-        triplePlayMode: 'timer',
-      });
-      expect(state.triplePiles).toHaveLength(3);
-      expect(state.turnTimerSeconds).toBe(7);
-
-      // 1. Timer Mode timeout -> +6 penalty
-      const afterTimeout = handleTriplePlayTimeout(state);
-      expect(afterTimeout.players[0].hand.length).toBe(13);
-      expect(afterTimeout.currentPlayerIndex).toBe(1);
-
-      // Force Pile #0 lit, red, pressure 5 (near overload)
-      const litState = {
-        ...state,
-        currentPlayerIndex: 0,
-        triplePiles: state.triplePiles!.map((p, idx) =>
-          idx === 0
-            ? { ...p, lit: true, activeColor: 'red' as const, pressure: 5, overloadThreshold: 8 }
-            : { ...p, lit: false }
-        ),
-      };
-
-      // 2. Discard Two sheds 2 same-color cards & adds +2 pressure!
-      const d2 = { id: 'dt2', color: 'red' as const, type: 'discard_two' as const };
-      const r3 = { id: 'r3', color: 'red' as const, type: 'number' as const, value: 3 };
-      const b7 = { id: 'b7', color: 'blue' as const, type: 'number' as const, value: 7 };
-      const afterD2 = unoTriplePlayRuleset.executeAction(
-        { ...litState, players: litState.players.map((p, i) => (i === 0 ? { ...p, hand: [d2, r3, b7] } : p)) },
-        'p_1',
-        { cardId: 'dt2', pileIndex: 0 }
-      );
-      expect(afterD2.players[0].hand.map((c) => c.id)).toEqual(['b7']);
-      expect(afterD2.triplePiles?.[0].pressure).toBe(7); // 5 + 2
-
-      // 3. Wild Clear resets pressure to 0 (NEVER overloads!)
-      const wc = { id: 'wc1', color: 'wild' as const, type: 'wild_clear' as const };
-      const afterWC = unoTriplePlayRuleset.executeAction(
-        { ...litState, players: litState.players.map((p, i) => (i === 0 ? { ...p, hand: [wc, b7] } : p)) },
-        'p_1',
-        { cardId: 'wc1', chosenColor: 'green', pileIndex: 0 }
-      );
-      expect(afterWC.triplePiles?.[0].pressure).toBe(0);
-      expect(afterWC.triplePiles?.[0].activeColor).toBe('green');
-
-      // 4. Wild Give Away gives pile cards to target opponent & resets pressure to 0!
-      const wga = { id: 'wga1', color: 'wild' as const, type: 'wild_give_away' as const };
-      const afterWGA = unoTriplePlayRuleset.executeAction(
-        { ...litState, players: litState.players.map((p, i) => (i === 0 ? { ...p, hand: [wga, b7] } : p)) },
-        'p_1',
-        { cardId: 'wga1', chosenColor: 'blue', targetPlayerId: 'p_2', pileIndex: 0 }
-      );
-      expect(afterWGA.players[1].hand.length).toBeGreaterThan(litState.players[1].hand.length);
-      expect(afterWGA.triplePiles?.[0].pressure).toBe(0);
-
-      // 5. Official scoring: Numbers=face, Rev/Skip=20, Discard Two=30, Wild/Wild Clear/Give Away=50
-      expect(
-        calculateTriplePlayHandPoints([
-          { id: '1', color: 'red', type: 'number', value: 4 },
-          { id: '2', color: 'blue', type: 'skip' },
-          { id: '3', color: 'green', type: 'discard_two' },
-          { id: '4', color: 'wild', type: 'wild_give_away' },
-        ])
-      ).toBe(4 + 20 + 30 + 50);
-    });
-  });
-
-  describe('GAME 10 — UNO JUNIOR (Official 56-Card 3-Level Rules)', () => {
-    it('filters 36/48/56-card decks with NO Wild Draw Four, matches by Color/Number/Animal, supports Draw-or-Save, and uses no points', () => {
-      const begDeck = unoJuniorRuleset.createDeck({
-        targetScore: 0,
-        singleRound: true,
-        juniorLevel: 'beginner',
-      });
-      const intDeck = unoJuniorRuleset.createDeck({
-        targetScore: 0,
-        singleRound: true,
-        juniorLevel: 'intermediate',
-      });
-      const advDeck = unoJuniorRuleset.createDeck({
-        targetScore: 0,
-        singleRound: true,
-        juniorLevel: 'advanced',
-      });
-      expect(begDeck).toHaveLength(36);
-      expect(intDeck).toHaveLength(48);
-      expect(advDeck).toHaveLength(56);
-      expect(begDeck.every((c) => c.type === 'number' && Boolean(c.animal))).toBe(true);
-      expect(advDeck.some((c) => c.type === 'wild_draw4')).toBe(false);
-
-      // 3-criteria matching: Animal match works even with DIFFERENT color & DIFFERENT number!
-      const bluePanda5 = { id: 'bp5', color: 'blue' as const, type: 'number' as const, value: 5, animal: '🐼' };
-      const redPanda2 = { id: 'rp2', color: 'red' as const, type: 'number' as const, value: 2, animal: '🐼' };
-      const greenLion7 = { id: 'gl7', color: 'green' as const, type: 'number' as const, value: 7, animal: '🦁' };
-      expect(juniorCardMatches(redPanda2, bluePanda5, 'blue')).toBe(true); // Animal match!
-      expect(juniorCardMatches(greenLion7, bluePanda5, 'blue')).toBe(false);
-
-      // Deals 5 cards each, no points (score = 0), and supports Draw-then-Save!
-      const players = makeDefaultPlayers(['Anak 1', 'Anak 2'], 'local');
-      const state = unoJuniorRuleset.initializeGame(players, 'local', {
-        targetScore: 0,
-        singleRound: true,
-        juniorLevel: 'beginner',
-      });
-      expect(state.players.every((p) => p.hand.length === 5)).toBe(true);
-      expect(unoJuniorRuleset.calculateScore(state, 'p_1')).toBe(0);
-
-      const drawPrep = {
-        ...state,
-        phase: 'playing' as const,
-        currentPlayerIndex: 0,
-        activeColor: 'blue' as const,
-        discardPile: [bluePanda5],
-        drawPile: [...state.drawPile, redPanda2],
-      };
-      const afterDraw = unoJuniorRuleset.handleDrawOrPass(drawPrep, 'p_1');
-      expect(afterDraw.drawnPlayableCardId).toBe('rp2');
-      expect(afterDraw.currentPlayerIndex).toBe(0); // Can play immediately or save!
-      const afterSave = passAfterJuniorDraw(afterDraw, 'p_1');
-      expect(afterSave.drawnPlayableCardId).toBeNull();
-      expect(afterSave.currentPlayerIndex).toBe(1);
     });
   });
 });

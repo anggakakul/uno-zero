@@ -24,30 +24,30 @@ export const VictoryPage: React.FC<VictoryPageProps> = ({
 
   return (
     <div className="min-h-screen table-felt text-slate-100 py-10 px-4 flex flex-col items-center justify-center">
-      <div className="w-full max-w-xl space-y-6">
+      <main className="w-full max-w-xl space-y-6">
         <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
+          initial={{ scale: 0.96, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          className="rounded-3xl bg-slate-900/90 border-2 border-amber-400/60 p-7 text-center shadow-2xl space-y-3"
+          className="rounded-2xl bg-slate-950/90 border border-amber-400/45 p-7 text-center shadow-xl space-y-3"
         >
-          <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-amber-300 via-yellow-400 to-orange-500 flex items-center justify-center shadow-xl shadow-amber-500/30">
-            <Trophy className="w-10 h-10 text-slate-950" strokeWidth={2.5} />
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-400 flex items-center justify-center">
+            <Trophy className="w-8 h-8 text-slate-950" strokeWidth={2.5} />
           </div>
-          <span className="inline-block px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 text-xs font-extrabold tracking-widest uppercase">
-            {state.config.totalRounds} Ronde Selesai
+          <span className="inline-block px-3 py-1 rounded-lg bg-amber-950/80 border border-amber-400/40 text-amber-300 text-xs font-bold tracking-wider uppercase">
+            UNO ZERO • {state.config.totalRounds} Ronde Selesai
           </span>
-          <h1 className="font-display text-4xl sm:text-5xl font-black text-white">
+          <h1 className="font-display italic text-4xl sm:text-5xl font-black text-white">
             {winnerLabel}
           </h1>
           <p className="text-sm sm:text-base text-slate-300">
-            Pemenang UNO ZERO dengan total skor paling rendah:{' '}
-            <strong className="text-emerald-300 text-lg">{lowestScore} poin</strong>!
+            Pemenang UNO ZERO dengan total skor terendah:{' '}
+            <strong className="text-emerald-300 text-lg tabular-nums">{lowestScore} poin</strong>.
           </p>
         </motion.div>
 
-        <section className="rounded-3xl bg-slate-900/90 border border-slate-800 p-5 space-y-3">
-          <h2 className="font-display font-bold text-base text-slate-200">
-            Peringkat Akhir (Skor Terendah → Tertinggi)
+        <section className="rounded-2xl bg-slate-950/90 border border-slate-800 p-5 space-y-3">
+          <h2 className="font-display font-bold text-sm uppercase tracking-wider text-slate-300">
+            Peringkat Akhir (Skor Terendah ke Tertinggi)
           </h2>
           <div className="space-y-2">
             {ranked.map((player, idx) => {
@@ -55,15 +55,15 @@ export const VictoryPage: React.FC<VictoryPageProps> = ({
               return (
                 <div
                   key={player.id}
-                  className={`flex items-center justify-between px-4 py-3 rounded-2xl border ${
+                  className={`flex items-center justify-between px-4 py-3 rounded-xl border ${
                     isWinner
-                      ? 'bg-emerald-500/15 border-emerald-400/50'
-                      : 'bg-slate-950/60 border-slate-800'
+                      ? 'bg-emerald-950/60 border-emerald-400/50'
+                      : 'bg-slate-900/90 border-slate-800'
                   }`}
                 >
                   <div className="flex items-center gap-3">
                     <span
-                      className={`w-8 h-8 rounded-xl font-display font-black text-sm flex items-center justify-center ${
+                      className={`w-8 h-8 rounded-lg font-display font-black text-sm flex items-center justify-center ${
                         isWinner
                           ? 'bg-amber-400 text-slate-950'
                           : 'bg-slate-800 text-slate-300'
@@ -79,8 +79,8 @@ export const VictoryPage: React.FC<VictoryPageProps> = ({
                     </div>
                   </div>
                   <span
-                    className={`font-display font-black text-lg ${
-                      isWinner ? 'text-emerald-300' : 'text-slate-300'
+                    className={`font-display font-black text-lg tabular-nums ${
+                      isWinner ? 'text-emerald-300' : 'text-slate-200'
                     }`}
                   >
                     {player.totalScore} poin
@@ -95,32 +95,32 @@ export const VictoryPage: React.FC<VictoryPageProps> = ({
           <button
             type="button"
             onClick={onPlayAgain}
-            className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 hover:from-amber-300 hover:to-rose-400 text-slate-950 font-display font-black text-lg flex items-center justify-center gap-2 shadow-xl cursor-pointer transition active:scale-[0.98]"
+            className="w-full min-h-12 py-3.5 px-6 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-display font-black text-base flex items-center justify-center gap-2 transition active:scale-[0.98]"
           >
             <RotateCcw className="w-5 h-5" />
-            MAIN LAGI
+            Main Lagi
           </button>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <button
               type="button"
               onClick={onViewScoreboard}
-              className="py-3.5 px-5 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-300 font-display font-bold text-sm flex items-center justify-center gap-2 cursor-pointer transition"
+              className="min-h-11 py-3 px-5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-300 font-display font-bold text-sm flex items-center justify-center gap-2 transition"
             >
               <ClipboardList className="w-4 h-4" />
-              LIHAT SCOREBOARD
+              Lihat Scoreboard
             </button>
             <button
               type="button"
               onClick={onMainMenu}
-              className="py-3.5 px-5 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-display font-bold text-sm flex items-center justify-center gap-2 cursor-pointer transition"
+              className="min-h-11 py-3 px-5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-100 font-display font-bold text-sm flex items-center justify-center gap-2 transition"
             >
               <Home className="w-4 h-4" />
-              KEMBALI KE MENU UTAMA
+              Kembali ke Hub
             </button>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 };

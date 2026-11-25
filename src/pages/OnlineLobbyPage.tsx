@@ -116,7 +116,7 @@ export const OnlineLobbyPage: React.FC<OnlineLobbyPageProps> = ({
                 connectionStatus === 'connected'
                   ? 'bg-emerald-500/15 text-emerald-300'
                   : connectionStatus === 'reconnecting'
-                  ? 'bg-amber-500/15 text-amber-300 animate-pulse'
+                  ? 'bg-amber-500/15 text-amber-300'
                   : 'bg-rose-500/15 text-rose-300'
               }`}
             >
@@ -243,7 +243,7 @@ export const OnlineLobbyPage: React.FC<OnlineLobbyPageProps> = ({
                     </span>
                     <span
                       className={`w-2.5 h-2.5 rounded-full ${
-                        p.connected ? 'bg-emerald-400' : 'bg-rose-500 animate-pulse'
+                        p.connected ? 'bg-emerald-400' : 'bg-rose-500'
                       }`}
                       title={p.connected ? 'Online' : 'Terputus'}
                     />
@@ -369,7 +369,7 @@ export const OnlineLobbyPage: React.FC<OnlineLobbyPageProps> = ({
             value={playerName}
             onChange={(e) => handleNameChange(e.target.value)}
             placeholder="Masukkan nama tampilan..."
-            className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-slate-700 text-white font-semibold focus:border-amber-400 focus:outline-none"
+            className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-slate-700 text-white font-semibold focus:border-amber-400"
           />
         </div>
 
@@ -390,7 +390,7 @@ export const OnlineLobbyPage: React.FC<OnlineLobbyPageProps> = ({
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
               placeholder="Contoh: K7M9P"
-              className="flex-1 px-4 py-3 rounded-2xl bg-slate-950 border border-slate-700 text-white font-display font-black tracking-widest uppercase focus:border-sky-400 focus:outline-none"
+              className="flex-1 px-4 py-3 rounded-2xl bg-slate-950 border border-slate-700 text-white font-display font-black tracking-widest uppercase focus:border-sky-400"
             />
             <button
               type="button"

@@ -232,7 +232,7 @@ export const unoClassicRuleset: UnoRuleset = {
   },
 
   checkWinCondition(state) {
-    const winner = state.players.find((p) => p.hand.length === 0);
+    const winner = state.players.find((p) => !p.isOut && !p.eliminated && p.hand.length === 0);
     if (!winner) return state;
     const pts = this.calculateScore(state, winner.id);
     return finalizeStandardRoundWin(state, winner.id, pts, 'Menghabiskan seluruh kartu di tangan!');

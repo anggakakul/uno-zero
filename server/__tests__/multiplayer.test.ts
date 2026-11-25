@@ -47,7 +47,7 @@ function emitAck<T>(socket: Socket, event: string, payload?: unknown): Promise<T
   });
 }
 
-describe('UNO ZERO & All 19 Hub Modes — Real-Time Online Multiplayer Integration', () => {
+describe('UNO ZERO & All 10 Hub Modes — Real-Time Online Multiplayer Integration', () => {
   let serverUrl = '';
   let closeServer: () => Promise<void>;
   const openSockets: Socket[] = [];
@@ -188,8 +188,8 @@ describe('UNO ZERO & All 19 Hub Modes — Real-Time Online Multiplayer Integrati
     guestReconn.disconnect();
   });
 
-  it('verifies all 19 Hub UNO variants are registered and covered', () => {
-    expect(ALL_HUB_VARIANTS).toHaveLength(19);
+  it('verifies all 10 Hub UNO variants are registered and covered', () => {
+    expect(ALL_HUB_VARIANTS).toHaveLength(10);
   });
 
   for (const variantId of ALL_HUB_VARIANTS) {
@@ -293,11 +293,9 @@ describe('UNO ZERO & All 19 Hub Modes — Real-Time Online Multiplayer Integrati
       );
       expect(rejectedMove.ok).toBe(false);
 
-      // 8. Active player executes a real move (play legal card or draw/golf_take_draw)
+      // 8. Active player executes a real move (play legal card or draw)
       let actionToSend: HubOnlineAction;
-      if (variantId === 'uno-golf') {
-        actionToSend = { type: 'golf_take_draw' };
-      } else if (activeState.pendingPrompt && activeState.pendingPrompt.actorId === currentActorId) {
+      if (activeState.pendingPrompt && activeState.pendingPrompt.actorId === currentActorId) {
         const decision = ruleset.decideAIMove(activeState);
         actionToSend =
           decision.type === 'resolve_prompt'
@@ -347,10 +345,10 @@ describe('UNO ZERO & All 19 Hub Modes — Real-Time Online Multiplayer Integrati
     });
   }
 
-  it('End-to-End Match Completion: two online clients play UNO Junior until game_over and receive identical winner', async () => {
+  it('End-to-End Match Completion: two online clients play UNO Classic until game_over and receive identical winner', async () => {
     const host = await connectClient();
     const guest = await connectClient();
-    const ruleset = getRuleset('uno-junior');
+    const ruleset = getRuleset('uno-classic');
 
     const created = await emitAck<{ ok: boolean; room?: HubOnlineRoomInfo }>(
       host,
@@ -358,8 +356,8 @@ describe('UNO ZERO & All 19 Hub Modes — Real-Time Online Multiplayer Integrati
       {
         playerName: 'ChampionA',
         sessionId: 'e2e-a',
-        variantId: 'uno-junior',
-        settings: { targetScore: 1, singleRound: true, juniorLevel: 'beginner' },
+        variantId: 'uno-classic',
+        settings: { targetScore: 500, singleRound: true },
       }
     );
     const code = created.room!.code;

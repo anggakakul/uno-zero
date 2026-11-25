@@ -1,3 +1,4 @@
+import { sanitizeAddOnPacksForVariant } from './expansions/addOnPacks';
 import { HubGameState, VariantId, VariantSettings } from './types';
 
 const SCHEMA_VERSION = 1;
@@ -93,6 +94,9 @@ export function saveVariantGame(state: HubGameState): void {
 export function clearVariantSave(variantId: VariantId): void {
   try {
     localStorage.removeItem(saveKey(variantId));
+    if (variantId === 'uno-zero') {
+      localStorage.removeItem('uno_zero_golf_saved_game_v2');
+    }
   } catch {
     // ignore
   }
@@ -112,17 +116,33 @@ export function hasVariantSave(variantId: VariantId): boolean {
 export function loadVariantSettings(variantId: VariantId, fallback: VariantSettings): VariantSettings {
   try {
     const raw = localStorage.getItem(settingsKey(variantId));
-    if (!raw) return fallback;
+    if (!raw) {
+      return {
+        ...fallback,
+        activePacks: sanitizeAddOnPacksForVariant(variantId, fallback.activePacks),
+      };
+    }
     const parsed = JSON.parse(raw) as Partial<VariantSettings>;
-    return { ...fallback, ...parsed };
+    const merged = { ...fallback, ...parsed };
+    return {
+      ...merged,
+      activePacks: sanitizeAddOnPacksForVariant(variantId, merged.activePacks),
+    };
   } catch {
-    return fallback;
+    return {
+      ...fallback,
+      activePacks: sanitizeAddOnPacksForVariant(variantId, fallback.activePacks),
+    };
   }
 }
 
 export function saveVariantSettings(variantId: VariantId, settings: VariantSettings): void {
   try {
-    localStorage.setItem(settingsKey(variantId), JSON.stringify(settings));
+    const sanitized: VariantSettings = {
+      ...settings,
+      activePacks: sanitizeAddOnPacksForVariant(variantId, settings.activePacks),
+    };
+    localStorage.setItem(settingsKey(variantId), JSON.stringify(sanitized));
   } catch {
     // ignore
   }

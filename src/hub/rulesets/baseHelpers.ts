@@ -2,6 +2,7 @@ import {
   appendEvent,
   calculateClassicHandPoints,
   drawCardsFromDeck,
+  getActivePlayers,
   getCardDisplayColor,
   getCardDisplayType,
   getCardDisplayValue,
@@ -11,6 +12,10 @@ import {
   pickMostFrequentColor,
   transitionTurnWithPrivacy,
 } from '../engine/core';
+import {
+  buildFinalStandings,
+  resolveWinConditionMode,
+} from '../engine/houseRules';
 import {
   HubCard,
   HubCardColor,
@@ -91,6 +96,87 @@ export function finalizeStandardRoundWin(
   const winner = state.players.find((p) => p.id === winnerId);
   if (!winner) return state;
 
+  const winMode = resolveWinConditionMode(state.settings, state.players.length, state.variantId);
+
+  // MODE 3: ELIMINASI BERTAHAP (Play to the Last Player: 3+ Pemain)
+  if (winMode === 'elimination') {
+    const prevFinishOrder = state.finishOrder ?? [];
+    const finishOrder = prevFinishOrder.includes(winnerId)
+      ? prevFinishOrder
+      : [...prevFinishOrder, winnerId];
+    const rank = finishOrder.indexOf(winnerId) + 1;
+
+    const updatedPlayers = state.players.map((p) =>
+      p.id === winnerId ? { ...p, isOut: true, calledUno: false } : p
+    );
+    const remainingActive = getActivePlayers(updatedPlayers);
+
+    // If only 1 active player remains -> Loser determined, match complete!
+    if (remainingActive.length <= 1) {
+      const championId = finishOrder[0] ?? winnerId;
+      const champion = updatedPlayers.find((p) => p.id === championId) ?? winner;
+      const loser = remainingActive[0];
+      const standings = buildFinalStandings(
+        { ...state, players: updatedPlayers },
+        finishOrder,
+        state.eliminatedOrder ?? []
+      );
+
+      const summary: HubRoundSummary = {
+        roundNumber: state.roundNumber,
+        winnerId: champion.id,
+        winnerName: champion.name,
+        pointsAwarded: 0,
+        reason: loser
+          ? `Mode Eliminasi selesai! Juara 1: ${champion.name} • Terakhir (Kalah): ${loser.name}`
+          : `Mode Eliminasi selesai! Juara 1: ${champion.name}`,
+        playerPoints: updatedPlayers.map((p) => ({
+          playerId: p.id,
+          playerName: p.name,
+          handPoints: calculateClassicHandPoints(p.hand, state.flipSide),
+          totalScore: p.score,
+          eliminated: p.eliminated,
+        })),
+        finalStandings: standings,
+      };
+
+      return appendEvent(
+        {
+          ...state,
+          players: updatedPlayers,
+          finishOrder,
+          phase: 'game_over',
+          winnerId: champion.id,
+          pendingPrompt: null,
+          unoVulnerablePlayerId: null,
+          roundHistory: [...state.roundHistory, summary],
+        },
+        'game_win',
+        `🏆 Eliminasi selesai! Juara 1: ${champion.name}${loser ? ` • ${loser.name} terakhir (Kalah)!` : ''}`
+      );
+    }
+
+    // Still 2+ active players -> player exits rotation & game continues!
+    const headToHeadNote =
+      remainingActive.length === 2
+        ? ' ⚡ Head-to-Head (2 pemain): Reverse kini berfungsi sebagai Skip!'
+        : '';
+
+    return appendEvent(
+      {
+        ...state,
+        players: updatedPlayers,
+        finishOrder,
+        phase: 'playing',
+        pendingPrompt: null,
+        unoVulnerablePlayerId: null,
+      },
+      'round_end',
+      `🏅 ${winner.name} keluar di Peringkat #${rank}! Sisa ${remainingActive.length} pemain.${headToHeadNote}`
+    );
+  }
+
+  // MODE 1 (KLASIK POINT-BASED) & MODE 2 (CEPAT / SINGLE-ROUND)
   const updatedPlayers = state.players.map((p) =>
     p.id === winnerId ? { ...p, score: p.score + pointsAwarded } : p
   );
@@ -111,7 +197,8 @@ export function finalizeStandardRoundWin(
   };
 
   const newWinnerScore = updatedPlayers.find((p) => p.id === winnerId)?.score ?? 0;
-  const reachedTarget = state.settings.singleRound || newWinnerScore >= state.settings.targetScore;
+  const reachedTarget =
+    winMode === 'quick_single' || newWinnerScore >= state.settings.targetScore;
 
   return appendEvent(
     {
@@ -125,7 +212,7 @@ export function finalizeStandardRoundWin(
     },
     reachedTarget ? 'game_win' : 'round_end',
     reachedTarget
-      ? `🏆 ${winner.name} memenangkan permainan dengan ${newWinnerScore} poin!`
+      ? `🏆 ${winner.name} memenangkan permainan${winMode === 'classic_points' ? ` dengan ${newWinnerScore} poin` : ' (Mode Cepat)'}!`
       : `🎉 ${winner.name} memenangkan Ronde ${state.roundNumber} (+${pointsAwarded} poin)!`
   );
 }
@@ -193,8 +280,7 @@ export function genericAIDecision(ruleset: UnoRuleset, state: HubGameState) {
     }
     if (
       prompt.type === 'target_swap' ||
-      prompt.type === 'target_draw2' ||
-      prompt.type === 'target_attack'
+      prompt.type === 'target_draw2'
     ) {
       const candidates = state.players.filter(
         (p) => p.id !== actor.id && !p.eliminated && !p.isOut
@@ -217,32 +303,16 @@ export function genericAIDecision(ruleset: UnoRuleset, state: HubGameState) {
   // Prefer non-wild playable cards first, then wilds
   const playable: { card: HubCard; useFlex?: boolean; pileIndex?: number }[] = [];
 
-  if (state.triplePiles) {
-    for (let pi = 0; pi < state.triplePiles.length; pi += 1) {
-      if (!state.triplePiles[pi].lit) continue;
-      for (const card of activePlayer.hand) {
-        const res = ruleset.validateMove(state, activePlayer.id, { cardId: card.id, pileIndex: pi });
-        if (res.valid) playable.push({ card, pileIndex: pi });
-      }
-    }
-    // Prefer lowest pressure pile
-    playable.sort((a, b) => {
-      const pa = state.triplePiles?.[a.pileIndex ?? 0]?.pressure ?? 0;
-      const pb = state.triplePiles?.[b.pileIndex ?? 0]?.pressure ?? 0;
-      return pa - pb;
-    });
-  } else {
-    for (const card of activePlayer.hand) {
-      const res = ruleset.validateMove(state, activePlayer.id, { cardId: card.id });
-      if (res.valid) {
-        playable.push({ card, useFlex: false });
-      } else if (activePlayer.powerActive) {
-        const flexRes = ruleset.validateMove(state, activePlayer.id, {
-          cardId: card.id,
-          useFlex: true,
-        });
-        if (flexRes.valid) playable.push({ card, useFlex: true });
-      }
+  for (const card of activePlayer.hand) {
+    const res = ruleset.validateMove(state, activePlayer.id, { cardId: card.id });
+    if (res.valid) {
+      playable.push({ card, useFlex: false });
+    } else if (activePlayer.powerActive) {
+      const flexRes = ruleset.validateMove(state, activePlayer.id, {
+        cardId: card.id,
+        useFlex: true,
+      });
+      if (flexRes.valid) playable.push({ card, useFlex: true });
     }
   }
 

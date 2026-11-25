@@ -1,36 +1,48 @@
-import { getNextPlayerIndex, transitionTurnWithPrivacy } from '../engine/core';
-import { HubGameState, MoveInput, UnoRuleset, VariantSettings } from '../types';
+import { applyOptionalMercyRule } from '../engine/houseRules';
+import { HubCard, HubCardColor, HubGameState, MoveInput, UnoRuleset, VariantSettings } from '../types';
 import {
   injectAddOnPackCards,
   isAddOnCardType,
+  isAddOnPackSupported,
   resolveAddOnCardEffect,
+  sanitizeAddOnPacksForVariant,
 } from './addOnPacks';
-import {
-  applyTippoDrop,
-  createInitialToolState,
-  injectDigitalToolCards,
-  isDigitalToolCardType,
-  resolveDigitalToolCard,
-  triggerBlastLauncher,
-  triggerRobotoAndFlash,
-} from './digitalTools';
+
+function pullStartingDiscard(deck: HubCard[]): {
+  firstCard: HubCard | undefined;
+  remaining: HubCard[];
+  activeColor: HubCardColor;
+} {
+  const remaining = [...deck];
+  const nonWildIdx = remaining.findIndex(
+    (c) => c.color !== 'wild' && !c.type.startsWith('wild') && !isAddOnCardType(c.type)
+  );
+  const firstCard =
+    nonWildIdx >= 0 ? remaining.splice(nonWildIdx, 1)[0] : remaining.pop();
+  const activeColor: HubCardColor =
+    firstCard && firstCard.color !== 'wild' ? firstCard.color : 'red';
+  return { firstCard, remaining, activeColor };
+}
 
 /**
- * Wraps any UnoRuleset with active Add-On Expansion Packs & Digital Table Tools
- * cleanly via Strategy Decoration — zero mutation of the underlying ruleset!
+ * Wraps any UnoRuleset with UNO Classic-only Add-On Expansion Packs
+ * cleanly via Strategy Decoration: zero mutation of the underlying ruleset!
+ *
+ * Defensive Guard: Add-On Packs are STRICTLY restricted to `uno-classic`.
+ * Any non-classic variant receiving `activePacks` will have them ignored & stripped with a warning.
  */
 export function wrapRulesetWithExpansions(base: UnoRuleset): UnoRuleset {
   return {
     id: base.id,
 
     createDeck(settings: VariantSettings) {
-      let deck = base.createDeck(settings);
-      // Do not inject standard UNO expansion cards into spinoffs with totally different card structures
-      if (base.id !== 'ono-99' && base.id !== 'uno-golf' && base.id !== 'uno-hearts') {
-        deck = injectAddOnPackCards(deck, settings.activePacks);
-        deck = injectDigitalToolCards(deck, settings.activeTools);
+      const deck = base.createDeck(settings);
+      const validPacks = sanitizeAddOnPacksForVariant(base.id, settings.activePacks, true);
+      if (validPacks.length === 0) {
+        return deck;
       }
-      return deck;
+      // Inject exact 16 cards per selected Add-On Pack into UNO Classic deck before shuffling
+      return injectAddOnPackCards(deck, validPacks);
     },
 
     shuffleDeck(deck) {
@@ -42,41 +54,47 @@ export function wrapRulesetWithExpansions(base: UnoRuleset): UnoRuleset {
     },
 
     initializeGame(players, mode, settings) {
-      // Temporarily initialize using expanded deck
-      const expandedDeck = this.shuffleDeck(this.createDeck(settings));
-      const baseState = base.initializeGame(players, mode, settings);
-      const hasExpansions =
-        (settings.activePacks && settings.activePacks.length > 0) ||
-        (settings.activeTools && settings.activeTools.length > 0);
+      const validPacks = sanitizeAddOnPacksForVariant(base.id, settings.activePacks, true);
+      const safeSettings: VariantSettings = {
+        ...settings,
+        activePacks: validPacks,
+      };
 
-      if (!hasExpansions || base.id === 'ono-99' || base.id === 'uno-golf' || base.id === 'uno-hearts') {
-        return {
-          ...baseState,
-          toolState: createInitialToolState(settings),
-        };
+      const baseState = base.initializeGame(players, mode, safeSettings);
+      if (!isAddOnPackSupported(base.id) || validPacks.length === 0) {
+        return baseState;
       }
 
-      // Re-deal cleanly from expandedDeck so expansion cards enter hands & drawPile!
-      const resetPlayers = baseState.players.map((p) => ({ ...p, hand: [] }));
+      // Build UNO Classic (108) + 16 cards per active pack, shuffle, deal, and pick opening discard
+      const expandedDeck = this.shuffleDeck(this.createDeck(safeSettings));
+      const resetPlayers = baseState.players.map((p) => ({ ...p, hand: [], calledUno: false }));
       const { players: dealt, remainingDeck } = this.dealCards(
         expandedDeck,
         resetPlayers,
-        settings
+        safeSettings
       );
+      const { firstCard, remaining, activeColor } = pullStartingDiscard(remainingDeck);
+
       return {
         ...baseState,
         players: dealt,
-        drawPile: remainingDeck,
-        toolState: createInitialToolState(settings),
+        drawPile: remaining,
+        discardPile: firstCard ? [firstCard] : [],
+        activeColor,
+        settings: safeSettings,
         alliances: [],
       };
     },
 
     validateMove(state: HubGameState, playerId: string, move: MoveInput) {
+      if (!isAddOnPackSupported(state.variantId)) {
+        return base.validateMove(state, playerId, move);
+      }
+
       const current = state.players[state.currentPlayerIndex];
       const card = current?.hand.find((c) => c.id === move.cardId);
 
-      // Stack Pack global stacking validation
+      // Stack Pack global stacking validation (UNO Classic only)
       if (
         card &&
         state.pendingDrawCount > 0 &&
@@ -98,15 +116,11 @@ export function wrapRulesetWithExpansions(base: UnoRuleset): UnoRuleset {
         }
       }
 
-      if (card && (isAddOnCardType(card.type) || isDigitalToolCardType(card.type))) {
+      if (card && isAddOnCardType(card.type)) {
         if (state.phase !== 'playing' || !current || current.id !== playerId) {
           return { valid: false, reason: 'Bukan giliranmu.' };
         }
-        if (
-          card.color === 'wild' ||
-          card.color === state.activeColor ||
-          state.variantId === 'uno-all-wild'
-        ) {
+        if (card.color === 'wild' || card.color === state.activeColor) {
           return { valid: true, requiresColor: card.color === 'wild' };
         }
         return { valid: false, reason: 'Kartu ekspansi harus cocok dengan warna aktif!' };
@@ -116,11 +130,15 @@ export function wrapRulesetWithExpansions(base: UnoRuleset): UnoRuleset {
     },
 
     executeAction(state: HubGameState, playerId: string, move: MoveInput) {
+      if (!isAddOnPackSupported(state.variantId)) {
+        return applyOptionalMercyRule(base.executeAction(state, playerId, move));
+      }
+
       const current = state.players[state.currentPlayerIndex];
       const card = current?.hand.find((c) => c.id === move.cardId);
 
-      // Handle Add-On Pack or Digital Tool cards first
-      if (card && (isAddOnCardType(card.type) || isDigitalToolCardType(card.type))) {
+      // Handle Add-On Pack cards first (UNO Classic only)
+      if (card && isAddOnCardType(card.type)) {
         const val = this.validateMove(state, playerId, move);
         if (!val.valid) return state;
 
@@ -150,41 +168,27 @@ export function wrapRulesetWithExpansions(base: UnoRuleset): UnoRuleset {
           ),
         };
 
-        let steps = 1;
-        if (isAddOnCardType(card.type)) {
-          const res = resolveAddOnCardEffect(
-            working,
-            card,
-            playerId,
-            move.chosenColor,
-            move.targetPlayerId
-          );
-          working = res.state;
-          steps = res.steps;
-        } else {
-          const res = resolveDigitalToolCard(working, card, playerId, move.chosenColor);
-          working = res.state;
-        }
+        const res = resolveAddOnCardEffect(
+          working,
+          card,
+          playerId,
+          move.chosenColor,
+          move.targetPlayerId
+        );
+        working = res.state;
+        const steps = res.steps;
 
-        // Apply Tippo drop if active
-        working = applyTippoDrop(working, card, playerId, move.tippoSide ?? 'left');
+        working = applyOptionalMercyRule(working);
+        if (working.phase === 'round_over' || working.phase === 'game_over') return working;
+
         working = base.checkWinCondition(working);
         if (working.phase === 'round_over' || working.phase === 'game_over') return working;
 
-        working = triggerRobotoAndFlash(working);
         if (steps === 0) return working;
         return base.advanceTurn(working, steps);
       }
 
-      // Otherwise delegate to base ruleset, then run Tippo + Roboto/Flash hooks!
-      let next = base.executeAction(state, playerId, move);
-      if (card && next.discardPile.length > state.discardPile.length) {
-        next = applyTippoDrop(next, card, playerId, move.tippoSide ?? 'left');
-        if (next.phase === 'playing') {
-          next = triggerRobotoAndFlash(next);
-        }
-      }
-      return next;
+      return applyOptionalMercyRule(base.executeAction(state, playerId, move));
     },
 
     advanceTurn(state, steps = 1) {
@@ -200,39 +204,47 @@ export function wrapRulesetWithExpansions(base: UnoRuleset): UnoRuleset {
     },
 
     resetRound(state) {
-      const next = base.resetRound(state);
+      const validPacks = sanitizeAddOnPacksForVariant(base.id, state.settings.activePacks, true);
+      const safeSettings: VariantSettings = {
+        ...state.settings,
+        activePacks: validPacks,
+      };
+      const nextBase = base.resetRound({ ...state, settings: safeSettings });
+
+      if (!isAddOnPackSupported(base.id) || validPacks.length === 0) {
+        return nextBase;
+      }
+
+      // Preserve Add-On Packs cleanly across subsequent UNO Classic rounds
+      const expandedDeck = this.shuffleDeck(this.createDeck(safeSettings));
+      const resetPlayers = nextBase.players.map((p) => ({ ...p, hand: [], calledUno: false }));
+      const { players: dealt, remainingDeck } = this.dealCards(
+        expandedDeck,
+        resetPlayers,
+        safeSettings
+      );
+      const { firstCard, remaining, activeColor } = pullStartingDiscard(remainingDeck);
+
       return {
-        ...next,
-        toolState: createInitialToolState(state.settings),
+        ...nextBase,
+        players: dealt,
+        drawPile: remaining,
+        discardPile: firstCard ? [firstCard] : [],
+        activeColor,
+        settings: safeSettings,
+        alliances: [],
       };
     },
 
     handleDrawOrPass(state, playerId) {
-      // If UNO Blast Digital Tool is enabled, replace normal draw with Blast Launcher!
-      if (
-        (state.settings.activeTools ?? []).includes('uno-blast') &&
-        state.variantId !== 'uno-attack' &&
-        state.variantId !== 'ono-99' &&
-        state.variantId !== 'uno-golf' &&
-        state.variantId !== 'uno-hearts'
-      ) {
-        const blasted = triggerBlastLauncher(state, playerId);
-        const nextIdx = getNextPlayerIndex(
-          blasted.players,
-          blasted.currentPlayerIndex,
-          blasted.direction,
-          1
-        );
-        return transitionTurnWithPrivacy(blasted, nextIdx);
-      }
-      return base.handleDrawOrPass(state, playerId);
+      return applyOptionalMercyRule(base.handleDrawOrPass(state, playerId));
     },
 
     resolvePrompt(state, payload) {
-      if (state.pendingPrompt?.cardId) {
+      if (isAddOnPackSupported(state.variantId) && state.pendingPrompt?.cardId) {
         const actor = state.players.find((p) => p.id === state.pendingPrompt?.actorId);
         const card = actor?.hand.find((c) => c.id === state.pendingPrompt?.cardId);
-        if (card && (isAddOnCardType(card.type) || isDigitalToolCardType(card.type))) {
+        if (card && isAddOnCardType(card.type)) {
           return this.executeAction(
             { ...state, phase: 'playing', pendingPrompt: null },
             state.pendingPrompt.actorId,
@@ -244,7 +256,7 @@ export function wrapRulesetWithExpansions(base: UnoRuleset): UnoRuleset {
           );
         }
       }
-      return base.resolvePrompt(state, payload);
+      return applyOptionalMercyRule(base.resolvePrompt(state, payload));
     },
 
     decideAIMove(state) {

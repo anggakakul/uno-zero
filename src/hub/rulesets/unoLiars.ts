@@ -552,7 +552,7 @@ export function challengeWildSubmission(state: HubGameState, targetPlayerId: str
   return finishWildLiarsChallenge(
     state,
     { ...wlc, submissions: updatedSubs },
-    `😎 ${sub.playerName} JUJUR (memang ${getColorLabel(wlc.chosenColor)})! Tantangan berhenti — semua kartu tersisa langsung dibuang!`
+    `😎 ${sub.playerName} JUJUR (memang ${getColorLabel(wlc.chosenColor)})! Tantangan berhenti: semua kartu tersisa langsung dibuang!`
   );
 }
 
@@ -764,7 +764,7 @@ export const unoLiarsRuleset: UnoRuleset = {
       );
     }
 
-    // 3) LIAR'S CARD (Always FACE DOWN — honest or plausible bluff!)
+    // 3) LIAR'S CARD (Always FACE DOWN: honest or plausible bluff!)
     const effTop = state.liarsTopClaim ?? state.discardPile[state.discardPile.length - 1];
     const cardIsHonestMatch = matchesLiarsTop(state, card.color, card.type, card.value);
 
@@ -848,7 +848,7 @@ export const unoLiarsRuleset: UnoRuleset = {
   },
 
   checkWinCondition(state) {
-    const winner = state.players.find((p) => p.hand.length === 0);
+    const winner = state.players.find((p) => !p.isOut && !p.eliminated && p.hand.length === 0);
     if (!winner) return state;
     const pts = this.calculateScore(state, winner.id);
     return finalizeStandardRoundWin(state, winner.id, pts, "Menang di Liar's UNO!");

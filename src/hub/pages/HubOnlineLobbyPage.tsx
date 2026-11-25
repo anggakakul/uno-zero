@@ -9,6 +9,7 @@ import {
   Crown,
   Gamepad2,
   Globe,
+  Layers,
   Link2,
   LogIn,
   Play,
@@ -26,6 +27,10 @@ import {
 } from '../../services/session';
 import { OnlinePlayerNotice } from '../../types/game';
 import { VARIANT_CATALOG, getVariantMetadata } from '../catalog';
+import {
+  isAddOnPackSupported,
+  sanitizeAddOnPacksForVariant,
+} from '../expansions/addOnPacks';
 import { TEAM_NAMES } from '../rulesets/unoTeams';
 import { HubOnlineRoomInfo, VariantId, VariantSettings } from '../types';
 
@@ -164,7 +169,7 @@ export const HubOnlineLobbyPage: React.FC<HubOnlineLobbyPageProps> = ({
                 connectionStatus === 'connected'
                   ? 'bg-emerald-500/15 text-emerald-300'
                   : connectionStatus === 'reconnecting'
-                  ? 'bg-amber-500/15 text-amber-300 animate-pulse'
+                  ? 'bg-amber-500/15 text-amber-300'
                   : 'bg-rose-500/15 text-rose-300'
               }`}
             >
@@ -255,7 +260,7 @@ export const HubOnlineLobbyPage: React.FC<HubOnlineLobbyPageProps> = ({
                 onChange={(e) =>
                   onUpdateRoomSettings({ variantId: e.target.value as HubVariantId })
                 }
-                className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-slate-700 text-white font-display font-bold text-sm focus:border-amber-400 focus:outline-none"
+                className="w-full min-h-11 px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-white font-display font-bold text-sm focus:border-amber-400"
               >
                 {HUB_VARIANTS.map((v) => (
                   <option key={v.id} value={v.id}>
@@ -324,6 +329,23 @@ export const HubOnlineLobbyPage: React.FC<HubOnlineLobbyPageProps> = ({
                 ))}
               </div>
             )}
+
+            {/* Add-On Packs Status (Only shown for UNO Classic) */}
+            {isAddOnPackSupported(room.variantId) && (
+              <div className="pt-2 border-t border-slate-800 text-xs">
+                <div className="flex items-center justify-between gap-2 text-amber-200">
+                  <span className="inline-flex items-center gap-1.5 font-bold">
+                    <Layers className="w-3.5 h-3.5 text-amber-400" />
+                    Add-On Packs (UNO Classic)
+                  </span>
+                  <span className="px-2 py-0.5 rounded-lg bg-amber-400/15 border border-amber-400/35 text-amber-300 font-bold text-[11px]">
+                    {(room.settings.activePacks ?? []).length > 0
+                      ? `${room.settings.activePacks!.length} Pack Aktif`
+                      : 'Tidak Ada Pack'}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Players List */}
@@ -349,7 +371,7 @@ export const HubOnlineLobbyPage: React.FC<HubOnlineLobbyPageProps> = ({
                     </span>
                     <span
                       className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                        p.connected ? 'bg-emerald-400' : 'bg-rose-500 animate-pulse'
+                        p.connected ? 'bg-emerald-400' : 'bg-rose-500'
                       }`}
                       title={p.connected ? 'Online' : 'Terputus'}
                     />
@@ -447,7 +469,7 @@ export const HubOnlineLobbyPage: React.FC<HubOnlineLobbyPageProps> = ({
         <div className="space-y-1">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-500/15 text-sky-300 text-xs font-bold">
             <Globe className="w-3.5 h-3.5" />
-            Online Multiplayer • Server-Authoritative • Semua 19 Mode Hub
+            Online Multiplayer • Server-Authoritative • Semua {HUB_VARIANTS.length} Mode Hub
           </div>
           <h1 className="font-display text-3xl font-black text-white">Lobi Online UNO Hub</h1>
           <p className="text-sm text-slate-400">
@@ -471,22 +493,23 @@ export const HubOnlineLobbyPage: React.FC<HubOnlineLobbyPageProps> = ({
           </div>
         )}
 
-        {/* Guest Nickname */}
-        <div className="rounded-3xl bg-slate-900/90 border border-slate-800 p-5 space-y-2">
-          <label className="text-sm font-bold text-white">Nickname</label>
+        <div className="rounded-2xl bg-slate-900/95 border border-slate-800 p-5 space-y-2">
+          <label htmlFor="hub-online-nickname" className="text-sm font-bold text-white block">
+            Nickname
+          </label>
           <input
+            id="hub-online-nickname"
             type="text"
             maxLength={20}
             value={playerName}
             onChange={(e) => handleNameChange(e.target.value)}
             placeholder="Masukkan nama tampilan..."
-            className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-slate-700 text-white font-semibold focus:border-amber-400 focus:outline-none"
+            className="w-full min-h-11 px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-white placeholder:text-slate-400 font-semibold focus:border-amber-400"
           />
         </div>
 
-        {/* Join Room */}
         <div
-          className={`rounded-3xl bg-slate-900/90 border p-5 space-y-4 ${
+          className={`rounded-2xl bg-slate-900/95 border p-5 space-y-4 ${
             prefillCode ? 'border-emerald-400/60 ring-2 ring-emerald-400/20' : 'border-slate-800'
           }`}
         >
@@ -495,13 +518,17 @@ export const HubOnlineLobbyPage: React.FC<HubOnlineLobbyPageProps> = ({
             Gabung Room dengan Kode
           </h2>
           <div className="flex gap-2">
+            <label htmlFor="hub-online-join-code" className="sr-only">
+              Kode Room
+            </label>
             <input
+              id="hub-online-join-code"
               type="text"
               maxLength={6}
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
               placeholder="Contoh: K7M9P"
-              className="flex-1 px-4 py-3 rounded-2xl bg-slate-950 border border-slate-700 text-white font-display font-black tracking-widest uppercase focus:border-sky-400 focus:outline-none"
+              className="flex-1 min-h-11 px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-white placeholder:text-slate-400 font-display font-black tracking-widest uppercase focus:border-sky-400"
             />
             <button
               type="button"
@@ -510,25 +537,27 @@ export const HubOnlineLobbyPage: React.FC<HubOnlineLobbyPageProps> = ({
                 saveGuestNickname(playerName);
                 onJoinRoom(joinCode, playerName);
               }}
-              className="px-6 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-display font-black text-sm cursor-pointer transition"
+              className="min-h-11 px-6 py-3 rounded-xl bg-sky-400 hover:bg-sky-300 disabled:opacity-40 text-slate-950 font-display font-black text-sm transition"
             >
-              GABUNG
+              Gabung
             </button>
           </div>
         </div>
 
-        {/* Create Room */}
-        <div className="rounded-3xl bg-slate-900/90 border border-slate-800 p-5 space-y-4">
+        <div className="rounded-2xl bg-slate-900/95 border border-slate-800 p-5 space-y-4">
           <h2 className="font-display font-bold text-lg text-white flex items-center gap-2">
             <PlusCircle className="w-5 h-5 text-amber-400" />
             Buat Room Baru
           </h2>
           <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-400">Pilih Mode UNO</label>
+            <label htmlFor="hub-online-create-variant" className="text-xs font-bold text-slate-300 block">
+              Pilih Mode UNO
+            </label>
             <select
+              id="hub-online-create-variant"
               value={createVariantId}
               onChange={(e) => setCreateVariantId(e.target.value as HubVariantId)}
-              className="w-full px-4 py-3 rounded-2xl bg-slate-950 border border-slate-700 text-white font-display font-bold text-sm focus:border-amber-400 focus:outline-none"
+              className="w-full min-h-11 px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-white font-display font-bold text-sm focus:border-amber-400"
             >
               {HUB_VARIANTS.map((v) => (
                 <option key={v.id} value={v.id}>
@@ -543,10 +572,14 @@ export const HubOnlineLobbyPage: React.FC<HubOnlineLobbyPageProps> = ({
             disabled={loading}
             onClick={() => {
               saveGuestNickname(playerName);
-              const settingsToUse =
+              const baseSettings =
                 createVariantId === initialVariantId && initialSettings
                   ? initialSettings
                   : createMeta.defaultSettings;
+              const settingsToUse: VariantSettings = {
+                ...baseSettings,
+                activePacks: sanitizeAddOnPacksForVariant(createVariantId, baseSettings.activePacks),
+              };
               onCreateRoom(
                 playerName,
                 createVariantId,

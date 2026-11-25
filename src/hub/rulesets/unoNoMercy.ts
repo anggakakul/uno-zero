@@ -293,7 +293,7 @@ export const unoNoMercyRuleset: UnoRuleset = {
     const card = current.hand.find((c) => c.id === move.cardId)!;
     let remainingHand = current.hand.filter((c) => c.id !== card.id);
 
-    // Wild color choice (NOT Color Roulette — the NEXT player chooses color!)
+    // Wild color choice (NOT Color Roulette: the NEXT player chooses color!)
     if (
       (card.type === 'wild_reverse_draw4' ||
         card.type === 'wild_draw6' ||
@@ -372,9 +372,9 @@ export const unoNoMercyRuleset: UnoRuleset = {
           // OFFICIAL 2-PLAYER EDGE CASE: reverses back onto the player who played it!
           // Actor must take the penalty UNLESS they immediately stack another Draw card!
           steps = 0;
-          message = `🔥 WILD REVERSE +4 (2 Pemain — ${getColorLabel(activeColor)})! Arah berbalik ke ${current.name} sendiri! Stack ≥+4 atau ambil +${pendingDrawCount}!`;
+          message = `🔥 WILD REVERSE +4 (2 Pemain: ${getColorLabel(activeColor)})! Arah berbalik ke ${current.name} sendiri! Stack ≥+4 atau ambil +${pendingDrawCount}!`;
         } else {
-          message = `🔥 WILD REVERSE +4 (${getColorLabel(activeColor)})! Arah dibalik — tumpukan penalti +${pendingDrawCount} menuju pemain di arah baru!`;
+          message = `🔥 WILD REVERSE +4 (${getColorLabel(activeColor)})! Arah dibalik: tumpukan penalti +${pendingDrawCount} menuju pemain di arah baru!`;
         }
       } else {
         message = `🔥 STACK +${drawVal}! Total tumpukan penalti kini +${pendingDrawCount}!`;

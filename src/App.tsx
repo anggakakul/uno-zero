@@ -15,6 +15,7 @@ import {
   discardDrawnCard,
   flipGridCardAfterDiscard,
   flipInitialCard,
+  getRankedPlayers,
   resolveDoubleDrawTwo,
   startNewRound,
   swapWithGridSlot,
@@ -47,44 +48,78 @@ import {
 } from './services/session';
 import { submitGlobalMatchResults } from './services/leaderboard';
 import { soundFX } from './services/sound';
-import { HomePage } from './pages/HomePage';
-import { SetupPage } from './pages/SetupPage';
+import { recordVariantMatchHistory } from './hub/storage';
 import { OnlineLobbyPage } from './pages/OnlineLobbyPage';
 import { GamePage } from './pages/GamePage';
 import { RoundSummaryPage } from './pages/RoundSummaryPage';
 import { VictoryPage } from './pages/VictoryPage';
 import { ScoreboardPage } from './pages/ScoreboardPage';
-import { LeaderboardPage } from './pages/LeaderboardPage';
-import { HowToPlayPage } from './pages/HowToPlayPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { AboutPage } from './pages/AboutPage';
 
-type Screen =
-  | 'home'
-  | 'setup_ai'
-  | 'setup_local'
-  | 'online_lobby'
-  | 'game'
-  | 'scoreboard'
-  | 'leaderboard'
-  | 'how_to_play'
-  | 'settings'
-  | 'about';
+export interface UnoZeroLaunchIntent {
+  action: 'start_ai' | 'start_local' | 'resume' | 'online';
+  playerNames?: string[];
+  totalRounds?: number;
+  joinCode?: string;
+}
+
+type Screen = 'online_lobby' | 'game' | 'scoreboard';
 
 interface AppProps {
+  launchIntent?: UnoZeroLaunchIntent;
+  onOpenGuide?: () => void;
   onBackToHub?: () => void;
 }
 
-export function App({ onBackToHub }: AppProps = {}) {
-  const [config, setConfig] = useState<GameConfig>(() => loadSavedConfig());
-  const [mode, setMode] = useState<GameMode>('local');
-  const [gameState, setGameState] = useState<GameState | null>(() => loadSavedGame());
-  const [screen, setScreen] = useState<Screen>('home');
-  const [returnScreen, setReturnScreen] = useState<Screen>('home');
+export function App({ launchIntent, onOpenGuide, onBackToHub }: AppProps = {}) {
+  const [config] = useState<GameConfig>(() => {
+    const base = loadSavedConfig();
+    if (launchIntent?.totalRounds) {
+      return { ...base, totalRounds: launchIntent.totalRounds };
+    }
+    return base;
+  });
+
+  const [mode, setMode] = useState<GameMode>(() => {
+    if (launchIntent?.action === 'online') return 'online';
+    if (launchIntent?.action === 'start_ai') return 'ai';
+    if (launchIntent?.action === 'start_local') return 'local';
+    const saved = loadSavedGame();
+    if (saved?.players.some((p) => p.isAI)) return 'ai';
+    return 'local';
+  });
+
+  const [gameState, setGameState] = useState<GameState | null>(() => {
+    if (launchIntent?.action === 'start_ai' || launchIntent?.action === 'start_local') {
+      const names = launchIntent.playerNames ?? ['Kamu', 'Bot 1', 'Bot 2'];
+      const isAi = launchIntent.action === 'start_ai';
+      const players: PlayerInit[] = names.map((name, idx) => ({
+        id: `p-${idx + 1}`,
+        name: name.trim() || (isAi && idx > 0 ? `Bot ${idx}` : `Pemain ${idx + 1}`),
+        isAI: isAi && idx > 0,
+      }));
+      const base = loadSavedConfig();
+      const matchConfig: GameConfig = {
+        ...base,
+        totalRounds: launchIntent.totalRounds ?? base.totalRounds,
+      };
+      return createMatch(players, 0, matchConfig);
+    }
+    if (launchIntent?.action === 'resume') {
+      return loadSavedGame();
+    }
+    return loadSavedGame();
+  });
+
+  const [screen, setScreen] = useState<Screen>(() =>
+    launchIntent?.action === 'online' ? 'online_lobby' : 'game'
+  );
+  const [returnScreen, setReturnScreen] = useState<Screen>('game');
 
   const [onlineRoom, setOnlineRoom] = useState<OnlineRoomInfo | null>(null);
   const [onlinePlayerId, setOnlinePlayerId] = useState<string | null>(null);
-  const [inviteRoomCode, setInviteRoomCode] = useState<string | null>(() => getRoomCodeFromUrl());
+  const [inviteRoomCode, setInviteRoomCode] = useState<string | null>(
+    () => launchIntent?.joinCode ?? getRoomCodeFromUrl()
+  );
   const [onlineError, setOnlineError] = useState<string | null>(null);
   const [onlineLoading, setOnlineLoading] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<
@@ -93,6 +128,13 @@ export function App({ onBackToHub }: AppProps = {}) {
   const [onlineNotice, setOnlineNotice] = useState<OnlinePlayerNotice | null>(null);
 
   const recordedMatchIdRef = useRef<string | null>(null);
+  const autoOnlineStartedRef = useRef(false);
+
+  const exitToHub = () => {
+    if (onBackToHub) {
+      onBackToHub();
+    }
+  };
 
   useEffect(() => {
     saveConfig(config);
@@ -104,45 +146,54 @@ export function App({ onBackToHub }: AppProps = {}) {
     }
   }, [gameState, mode]);
 
-  // On initial mount: handle Invite Link (?room=ABCD) and Auto-Reconnect if refreshed mid-game!
+  // Handle Invite Link (?room=ABCD), Auto-Reconnect, or direct Online launch from Hub Setup
   useEffect(() => {
     const urlRoom = getRoomCodeFromUrl();
     const savedRoom = loadActiveRoomCode();
     const targetCode = urlRoom || savedRoom;
-    if (!targetCode) return;
 
-    let cancelled = false;
-    (async () => {
-      const res = await reconnectOnlineRoom(targetCode);
-      if (cancelled) return;
-      if (res.ok && res.room && res.playerId) {
-        setMode('online');
-        setOnlineRoom(res.room);
-        setOnlinePlayerId(res.playerId);
-        saveActiveRoomCode(res.room.code);
-        setRoomCodeInUrl(res.room.code);
-        if (res.gameState) {
-          setGameState(res.gameState);
-          setScreen('game');
-        } else {
+    if (targetCode) {
+      let cancelled = false;
+      (async () => {
+        const res = await reconnectOnlineRoom(targetCode);
+        if (cancelled) return;
+        if (res.ok && res.room && res.playerId) {
+          setMode('online');
+          setOnlineRoom(res.room);
+          setOnlinePlayerId(res.playerId);
+          saveActiveRoomCode(res.room.code);
+          setRoomCodeInUrl(res.room.code);
+          if (res.gameState) {
+            setGameState(res.gameState);
+            setScreen('game');
+          } else {
+            setScreen('online_lobby');
+          }
+        } else if (urlRoom) {
+          setInviteRoomCode(urlRoom);
           setScreen('online_lobby');
+        } else {
+          saveActiveRoomCode(null);
         }
-      } else if (urlRoom) {
-        // Fresh guest opening an invite link -> take them straight to Online Lobby pre-filled!
-        setInviteRoomCode(urlRoom);
-        setScreen('online_lobby');
-      } else {
-        // Stale saved room no longer exists on server
-        saveActiveRoomCode(null);
-      }
-    })();
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
 
-    return () => {
-      cancelled = true;
-    };
+    if (launchIntent?.action === 'online' && !autoOnlineStartedRef.current) {
+      autoOnlineStartedRef.current = true;
+      const hostName = launchIntent.playerNames?.[0] || 'Host';
+      const rounds = launchIntent.totalRounds ?? config.totalRounds;
+      if (launchIntent.joinCode && launchIntent.joinCode.trim().length >= 4) {
+        void handleJoinRoom(launchIntent.joinCode.trim(), hostName);
+      } else {
+        void handleCreateRoom(hostName, rounds);
+      }
+    }
   }, []);
 
-  // Record finished match to Leaderboard & play Victory Fanfare once per completed match
+  // Record finished match to Hub history & global leaderboard once per completed match
   useEffect(() => {
     if (!gameState || gameState.phase !== 'game_over') return;
     const lastRound = gameState.roundHistory[gameState.roundHistory.length - 1];
@@ -151,6 +202,22 @@ export function App({ onBackToHub }: AppProps = {}) {
     recordedMatchIdRef.current = matchSignature;
 
     soundFX.playVictoryFanfare();
+
+    const ranked = getRankedPlayers(gameState.players);
+    const lowestScore = ranked[0]?.totalScore ?? 0;
+    const winnerNames = ranked
+      .filter((p) => p.totalScore === lowestScore)
+      .map((p) => p.name)
+      .join(' & ');
+
+    recordVariantMatchHistory({
+      id: `uno-zero-${matchSignature}`,
+      variantId: 'uno-zero',
+      winnerName: winnerNames || ranked[0]?.name || 'Pemenang',
+      players: gameState.players.map((p) => ({ name: p.name, score: p.totalScore })),
+      rounds: gameState.roundNumber,
+      completedAt: Date.now(),
+    });
 
     if (mode !== 'online') {
       const winnerSet = new Set(gameState.winnerIds);
@@ -167,7 +234,6 @@ export function App({ onBackToHub }: AppProps = {}) {
     }
   }, [gameState?.phase, gameState?.roundHistory.length, mode]);
 
-  // Subscribe to online Socket.IO events + handle automatic socket reconnection after brief drop
   useEffect(() => {
     if (!onlineRoom) return;
     const roomCode = onlineRoom.code;
@@ -255,7 +321,7 @@ export function App({ onBackToHub }: AppProps = {}) {
     gameState?.roundNumber,
   ]);
 
-  // AI Bot Catch Human UNO! (80% chance after 3s)
+  // AI Bot Catch Human UNO (80% chance after 3s)
   useEffect(() => {
     if (mode !== 'ai' || screen !== 'game' || !gameState?.unoVulnerability) return;
     const vuln = gameState.unoVulnerability;
@@ -275,24 +341,6 @@ export function App({ onBackToHub }: AppProps = {}) {
 
     return () => clearTimeout(timer);
   }, [mode, screen, gameState?.unoVulnerability?.playerId, gameState?.unoVulnerability?.createdAt]);
-
-  const openAuxiliaryScreen = (
-    target: 'how_to_play' | 'settings' | 'about' | 'scoreboard' | 'leaderboard'
-  ) => {
-    setReturnScreen(screen);
-    setScreen(target);
-  };
-
-  const handleStartOfflineMatch = (
-    targetMode: 'ai' | 'local',
-    players: PlayerInit[],
-    dealerIndex: number
-  ) => {
-    setMode(targetMode);
-    const fresh = createMatch(players, dealerIndex, config);
-    setGameState(fresh);
-    setScreen('game');
-  };
 
   const handleCreateRoom = async (playerName: string, totalRounds: number) => {
     setOnlineError(null);
@@ -341,7 +389,7 @@ export function App({ onBackToHub }: AppProps = {}) {
     setOnlineError(null);
     setGameState(null);
     setMode('local');
-    setScreen('home');
+    exitToHub();
   };
 
   const handlePlayAgain = () => {
@@ -350,7 +398,7 @@ export function App({ onBackToHub }: AppProps = {}) {
       return;
     }
     if (!gameState) {
-      setScreen('home');
+      exitToHub();
       return;
     }
     const players: PlayerInit[] = gameState.players.map((p) => ({
@@ -362,53 +410,6 @@ export function App({ onBackToHub }: AppProps = {}) {
     setGameState(createMatch(players, nextDealer, config));
     setScreen('game');
   };
-
-  if (screen === 'home') {
-    return (
-      <HomePage
-        hasSavedGame={Boolean(gameState && mode !== 'online' && gameState.phase !== 'setup')}
-        onPlayAI={() => setScreen('setup_ai')}
-        onPlayOnline={() => {
-          setOnlineError(null);
-          setScreen('online_lobby');
-        }}
-        onPlayLocal={() => setScreen('setup_local')}
-        onResumeGame={() => {
-          if (gameState) {
-            const hasAI = gameState.players.some((p) => p.isAI);
-            setMode(hasAI ? 'ai' : 'local');
-            setScreen('game');
-          }
-        }}
-        onLeaderboard={() => openAuxiliaryScreen('leaderboard')}
-        onHowToPlay={() => openAuxiliaryScreen('how_to_play')}
-        onSettings={() => openAuxiliaryScreen('settings')}
-        onAbout={() => openAuxiliaryScreen('about')}
-        onBackToHub={onBackToHub}
-      />
-    );
-  }
-
-  if (screen === 'leaderboard') {
-    return <LeaderboardPage onBack={() => setScreen(returnScreen)} />;
-  }
-
-  if (screen === 'setup_ai' || screen === 'setup_local') {
-    const setupMode = screen === 'setup_ai' ? 'ai' : 'local';
-    return (
-      <SetupPage
-        mode={setupMode}
-        config={config}
-        onUpdateTotalRounds={(totalRounds) => setConfig((prev) => ({ ...prev, totalRounds }))}
-        onStartGame={(players, dealerIndex) =>
-          handleStartOfflineMatch(setupMode, players, dealerIndex)
-        }
-        onBack={() => setScreen('home')}
-        onOpenHowToPlay={() => openAuxiliaryScreen('how_to_play')}
-        onOpenSettings={() => openAuxiliaryScreen('settings')}
-      />
-    );
-  }
 
   if (screen === 'online_lobby') {
     return (
@@ -433,28 +434,10 @@ export function App({ onBackToHub }: AppProps = {}) {
         onBack={() => {
           setInviteRoomCode(null);
           setRoomCodeInUrl(null);
-          setScreen('home');
+          exitToHub();
         }}
       />
     );
-  }
-
-  if (screen === 'how_to_play') {
-    return <HowToPlayPage onBack={() => setScreen(returnScreen)} />;
-  }
-
-  if (screen === 'settings') {
-    return (
-      <SettingsPage
-        config={config}
-        onChange={setConfig}
-        onBack={() => setScreen(returnScreen)}
-      />
-    );
-  }
-
-  if (screen === 'about') {
-    return <AboutPage onBack={() => setScreen(returnScreen)} />;
   }
 
   if (screen === 'scoreboard' && gameState) {
@@ -500,10 +483,13 @@ export function App({ onBackToHub }: AppProps = {}) {
             } else {
               clearSavedGame();
               setGameState(null);
-              setScreen('home');
+              exitToHub();
             }
           }}
-          onViewScoreboard={() => openAuxiliaryScreen('scoreboard')}
+          onViewScoreboard={() => {
+            setReturnScreen('game');
+            setScreen('scoreboard');
+          }}
         />
       );
     }
@@ -548,9 +534,10 @@ export function App({ onBackToHub }: AppProps = {}) {
           if (mode === 'online') sendOnlineAction({ type: 'catch_uno' });
           else setGameState((prev) => (prev ? catchUno(prev) : prev));
         }}
+        onOpenGuide={onOpenGuide}
         onExitToMenu={() => {
           if (mode === 'online') handleLeaveOnline();
-          else setScreen('home');
+          else exitToHub();
         }}
       />
     );

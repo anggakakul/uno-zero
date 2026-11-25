@@ -6,10 +6,8 @@ import {
   buildHubOnlinePlayerInits,
   sanitizeHubGameStateForPlayer,
 } from '../src/hub/engine/hubActionEngine';
-import { resolveFlashReflex } from '../src/hub/expansions/digitalTools';
+import { sanitizeAddOnPacksForVariant } from '../src/hub/expansions/addOnPacks';
 import { getRuleset } from '../src/hub/rulesets';
-import { completeRuleQTE } from '../src/hub/rulesets/unoHouseRemix';
-import { handleTriplePlayTimeout } from '../src/hub/rulesets/unoTriplePlay';
 import {
   HubGameState,
   HubOnlineAction,
@@ -66,17 +64,8 @@ const VALID_HUB_VARIANTS = new Set<string>([
   'uno-all-wild',
   'uno-no-mercy',
   'uno-teams',
-  'uno-attack',
-  'uno-triple-play',
-  'uno-junior',
   'uno-party',
-  'uno-golf',
   'uno-liars',
-  'uno-house-remix',
-  'uno-dare-emoji',
-  'uno-express',
-  'uno-rummy-up',
-  'uno-hearts',
   'dos-mode',
   'ono-99',
 ]);
@@ -182,28 +171,14 @@ export function createHubRoomManager(io: Server): HubRoomManager {
       return;
     }
 
-    // 1. House Rules QTE AI Auto-Reaction
-    if (state.phase === 'house_rule_qte' && state.activeRuleQTE) {
-      const pendingAI = state.players.find(
-        (p) => p.isAI && !state.activeRuleQTE?.completedPlayerIds.includes(p.id)
-      );
-      if (pendingAI) {
-        room.aiTimer = setTimeout(() => {
-          if (!room.state || room.state.phase !== 'house_rule_qte') return;
-          room.state = completeRuleQTE(room.state, pendingAI.id);
-          broadcastGameState(room, true);
-        }, HUB_AI_STEP_MS);
-      }
-    }
-
-    // 2. AI Bot Turn or Prompt Automation (Server-Authoritative!)
+    // 1. AI Bot Turn or Prompt Automation (Server-Authoritative!)
     const promptActor = state.pendingPrompt
       ? state.players.find((p) => p.id === state.pendingPrompt?.actorId)
       : null;
     const activePlayer = state.players[state.currentPlayerIndex];
     const needsAI = promptActor ? promptActor.isAI : activePlayer?.isAI;
 
-    if (needsAI && state.phase !== 'house_rule_qte') {
+    if (needsAI) {
       state.turnDeadline = null;
       room.aiTimer = setTimeout(() => {
         if (!room.state) return;
@@ -217,62 +192,7 @@ export function createHubRoomManager(io: Server): HubRoomManager {
       return;
     }
 
-    // 3. Server-side 1-second tick for UNO Triple Play Timer Mode & UNO Flash Reflex
-    const needsTripleTimer =
-      state.variantId === 'uno-triple-play' &&
-      state.settings.triplePlayMode === 'timer' &&
-      state.phase === 'playing';
-    const needsFlashTimer = Boolean(state.toolState?.flashActive && state.phase === 'playing');
-
-    if (needsTripleTimer || needsFlashTimer) {
-      room.tickInterval = setInterval(() => {
-        if (!room.state || room.state.phase !== 'playing') {
-          if (room.tickInterval) clearInterval(room.tickInterval);
-          room.tickInterval = null;
-          return;
-        }
-        let changed = false;
-        let next = room.state;
-
-        if (
-          next.variantId === 'uno-triple-play' &&
-          next.settings.triplePlayMode === 'timer' &&
-          next.turnTimerSeconds !== undefined
-        ) {
-          if (next.turnTimerSeconds <= 1) {
-            next = handleTriplePlayTimeout(next);
-          } else {
-            next = { ...next, turnTimerSeconds: next.turnTimerSeconds - 1 };
-          }
-          changed = true;
-        }
-
-        if (next.toolState?.flashActive) {
-          const f = next.toolState.flashActive;
-          if (f.secondsLeft <= 1) {
-            next = resolveFlashReflex(next, f.targetPlayerId, false);
-          } else {
-            next = {
-              ...next,
-              toolState: {
-                ...next.toolState,
-                flashActive: { ...f, secondsLeft: f.secondsLeft - 1 },
-              },
-            };
-          }
-          changed = true;
-        }
-
-        if (changed) {
-          room.state = next;
-          const turnChanged =
-            next.currentPlayerIndex !== state.currentPlayerIndex || next.phase !== state.phase;
-          broadcastGameState(room, turnChanged);
-        }
-      }, 1000);
-    }
-
-    // 4. General Human Turn / Prompt Timeout (30s, or 8s if active player is disconnected)
+    // 2. General Human Turn / Prompt Timeout (30s, or 8s if active player is disconnected)
     if (resetTurnTimer || !room.turnTimer) {
       if (room.turnTimer) clearTimeout(room.turnTimer);
       const actorForTimer = promptActor ?? activePlayer;
@@ -473,9 +393,17 @@ export function createHubRoomManager(io: Server): HubRoomManager {
             ready: true,
           };
 
-          const settings: VariantSettings = {
+          const mergedSettings: VariantSettings = {
             ...meta.defaultSettings,
             ...(payload.settings ?? {}),
+          };
+          const settings: VariantSettings = {
+            ...mergedSettings,
+            activePacks: sanitizeAddOnPacksForVariant(
+              payload.variantId,
+              mergedSettings.activePacks,
+              true
+            ),
           };
 
           const defaultTarget = Math.max(
@@ -688,14 +616,33 @@ export function createHubRoomManager(io: Server): HubRoomManager {
             const newMeta = getVariantMetadata(payload.variantId);
             if (room.players.length <= newMeta.maxPlayers) {
               room.variantId = payload.variantId;
-              room.settings = { ...newMeta.defaultSettings, ...(payload.settings ?? {}) };
+              const nextSettings: VariantSettings = {
+                ...newMeta.defaultSettings,
+                ...(payload.settings ?? {}),
+              };
+              room.settings = {
+                ...nextSettings,
+                activePacks: sanitizeAddOnPacksForVariant(
+                  room.variantId,
+                  nextSettings.activePacks,
+                  true
+                ),
+              };
               room.targetPlayerCount = Math.max(
                 newMeta.minPlayers,
                 Math.min(newMeta.maxPlayers, payload.targetPlayerCount ?? newMeta.minPlayers)
               );
             }
           } else if (payload.settings) {
-            room.settings = { ...room.settings, ...payload.settings };
+            const merged = { ...room.settings, ...payload.settings };
+            room.settings = {
+              ...merged,
+              activePacks: sanitizeAddOnPacksForVariant(
+                room.variantId,
+                merged.activePacks,
+                true
+              ),
+            };
           }
 
           if (typeof payload.fillWithBots === 'boolean') {
@@ -774,7 +721,16 @@ export function createHubRoomManager(io: Server): HubRoomManager {
           );
 
           const ruleset = getRuleset(room.variantId);
-          const initialState = ruleset.initializeGame(playerInits, 'online', room.settings);
+          const safeSettings: VariantSettings = {
+            ...room.settings,
+            activePacks: sanitizeAddOnPacksForVariant(
+              room.variantId,
+              room.settings.activePacks,
+              true
+            ),
+          };
+          room.settings = safeSettings;
+          const initialState = ruleset.initializeGame(playerInits, 'online', safeSettings);
 
           // Ensure every player has connected: true initially
           room.state = {

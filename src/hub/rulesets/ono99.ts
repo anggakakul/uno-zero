@@ -20,7 +20,7 @@ import {
 import { finalizeStandardRoundWin } from './baseHelpers';
 
 /**
- * Modular ONO 99 Rule Config — cleanly separates Official 2022 Edition from Classic 1980s Mode!
+ * Modular ONO 99 Rule Config: cleanly separates Official 2022 Edition from Classic 1980s Mode!
  */
 export interface Ono99RuleConfig {
   edition: '2022' | 'classic_1980s';

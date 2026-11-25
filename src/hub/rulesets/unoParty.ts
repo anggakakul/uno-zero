@@ -395,7 +395,6 @@ export const unoPartyRuleset: UnoRuleset = {
     const current = state.players[state.currentPlayerIndex];
     const card = current.hand.find((c) => c.id === move.cardId)!;
 
-    // === HANDLING WILD PILE UP STACKING ===
     if (state.phase === 'party_pile_up' && state.partyPileUp) {
       const remaining = current.hand.filter((c) => c.id !== card.id);
       const players = state.players.map((p, idx) =>
@@ -422,7 +421,7 @@ export const unoPartyRuleset: UnoRuleset = {
       return { ...next, currentPlayerIndex: nextIdx };
     }
 
-    // Wild color choice (NOT Wild Pile Up — Pile Up uses the mini-pile's color!)
+    // Wild color choice (NOT Wild Pile Up: Pile Up uses the mini-pile's color!)
     if (card.color === 'wild' && card.type !== 'wild_pile_up' && !move.chosenColor) {
       return {
         ...state,
@@ -478,7 +477,6 @@ export const unoPartyRuleset: UnoRuleset = {
 
     let msg = `${current.name} memainkan ${card.type === 'number' ? `${getColorLabel(card.color)} ${card.value}` : card.type.toUpperCase()}.`;
 
-    // === WILD PILE UP ===
     if (card.type === 'wild_pile_up') {
       const miniCards: HubCard[] = [];
       let pileColor: HubCardColor = 'red';
@@ -515,7 +513,6 @@ export const unoPartyRuleset: UnoRuleset = {
       return this.checkWinCondition(nextState);
     }
 
-    // === WILD DRAW FOUR + OFFICIAL CHALLENGE ===
     if (card.type === 'wild_draw4') {
       const victimIdx = getNextPlayerIndex(players, state.currentPlayerIndex, direction, 1);
       const victim = players[victimIdx];
@@ -666,7 +663,7 @@ export const unoPartyRuleset: UnoRuleset = {
   },
 
   checkWinCondition(state) {
-    const winner = state.players.find((p) => p.hand.length === 0);
+    const winner = state.players.find((p) => !p.isOut && !p.eliminated && p.hand.length === 0);
     if (!winner) return state;
     const pts = this.calculateScore(state, winner.id);
     return finalizeStandardRoundWin(state, winner.id, pts, 'Juara UNO Party!');

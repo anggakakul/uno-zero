@@ -3,10 +3,8 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeftRight,
   Ban,
-  Flame,
   RefreshCw,
   Shuffle,
-  Sparkles,
   Target,
   Users,
   Zap,
@@ -14,10 +12,12 @@ import {
 import { getCardDisplayColor, getCardDisplayType, getCardDisplayValue } from '../engine/core';
 import { getFlexColorNotches } from '../rulesets/unoFlex';
 import { getLiarsColorSymbol } from '../rulesets/unoLiars';
-import { HubCard, HubCardColor } from '../types';
+import { getModeTheme } from '../themes/modeThemes';
+import { HubCard, HubCardColor, VariantId } from '../types';
 
 interface HubCardViewProps {
   card?: HubCard;
+  variantId?: VariantId;
   faceDown?: boolean;
   flipSide?: 'light' | 'dark';
   size?: 'xs' | 'sm' | 'md' | 'lg';
@@ -74,24 +74,13 @@ function getCornerBadge(type: string, value?: number): string {
     flex_draw2: '⚡+2',
     draw1: '+1',
     draw2: '+2',
-    double_draw2: '2×+2',
     draw4: '+4',
     draw5: '+5',
     draw6: '+6',
     draw10: '+10',
-    hit2: 'H2',
-    wild_hit4: 'H4',
-    wild_attack_attack: 'AA',
-    trade_hands: '🔀',
-    wild_all_hit: 'ALL🔥',
-    wild_hit_fire: '🌋',
     discard_all: 'ALL',
-    discard_two: '-2',
     flip: 'FLP',
-    clear: 'CLR',
     wild: 'W',
-    wild_clear: 'W✨',
-    wild_give_away: 'W🎁',
     wild_draw2: 'W+2',
     wild_draw4: 'W+4',
     wild_draw6: 'W+6',
@@ -109,21 +98,6 @@ function getCornerBadge(type: string, value?: number): string {
     drawn_together: '🔗',
     wild_pile_up: '📚',
     wild_liars_challenge: '🎭W',
-    wild_express_swap: 'W🔀',
-    wild_skip_all: 'W⊘⊘',
-    hazard5: '☠️5',
-    wild_shift: 'W+2',
-    tactical_swap: '8🔀',
-    wild_game_changer: '🌪️',
-    add_a_rule: '📜',
-    dare_card: '🔥',
-    wild_dare: 'W🔥',
-    wild_emoji: 'W😜',
-    wild_customizable: 'W✍️',
-    emoji_card: '😜',
-    spin_card: '🎡',
-    jackpot_card: '🎰',
-    power_grab: '⚡',
     reverse_draw2: '⇄+2',
     double_reverse: '🪃',
     reverse_skip: '⇄⊘',
@@ -154,7 +128,6 @@ function getCornerBadge(type: string, value?: number): string {
     wild_double_agent: '🕵️',
     wild_dos: 'DOS',
     wild_number: '#',
-    wild_rummy: 'WR',
     ono_minus10: '-10',
     ono_hold: '0',
     ono_play2: 'P2',
@@ -177,22 +150,11 @@ function getLabelText(type: string): string {
     flex_draw2: 'FLEX +2',
     draw1: 'DRAW 1',
     draw2: 'DRAW 2',
-    double_draw2: 'DBL +2',
     draw4: 'DRAW 4',
     draw5: 'DRAW 5',
-    hit2: 'HIT 2',
-    wild_hit4: 'HIT 4',
-    wild_attack_attack: 'ATTACK×2',
-    trade_hands: 'TRADE',
-    wild_all_hit: 'ALL HIT',
-    wild_hit_fire: 'HIT FIRE',
     discard_all: 'DISCARD ALL',
-    discard_two: 'DISCARD 2',
     flip: 'FLIP!',
-    clear: 'CLEAR',
     wild: 'WILD',
-    wild_clear: 'WILD CLEAR',
-    wild_give_away: 'GIVE AWAY',
     wild_draw2: 'WILD +2',
     wild_draw4: 'WILD +4',
     wild_draw6: 'WILD +6',
@@ -210,21 +172,6 @@ function getLabelText(type: string): string {
     drawn_together: 'LINKED',
     wild_pile_up: 'PILE UP',
     wild_liars_challenge: "LIAR'S",
-    wild_express_swap: 'SNATCH',
-    wild_skip_all: 'TURBO',
-    hazard5: 'HAZARD 5',
-    wild_shift: 'W-SHIFT',
-    tactical_swap: 'SWAP 1',
-    wild_game_changer: 'CHANGER',
-    add_a_rule: 'ADD RULE',
-    dare_card: 'DARE!',
-    wild_dare: 'W-DARE',
-    wild_emoji: 'W-EMOJI',
-    wild_customizable: 'CUSTOM',
-    emoji_card: 'EMOJI!',
-    spin_card: 'SPIN!',
-    jackpot_card: 'JACKPOT',
-    power_grab: 'POWER',
     reverse_draw2: 'REV +2',
     double_reverse: 'BOOMERANG',
     reverse_skip: 'REV SKIP',
@@ -255,7 +202,6 @@ function getLabelText(type: string): string {
     wild_double_agent: 'DBL AGENT',
     wild_dos: 'WILD DOS',
     wild_number: 'WILD #',
-    wild_rummy: 'W-RUMMY',
     ono_minus10: 'MINUS 10',
     ono_hold: 'HOLD 0',
     ono_play2: 'PLAY 2',
@@ -266,6 +212,7 @@ function getLabelText(type: string): string {
 
 export const HubCardView: React.FC<HubCardViewProps> = ({
   card,
+  variantId = 'uno-classic',
   faceDown = false,
   flipSide = 'light',
   size = 'md',
@@ -276,6 +223,7 @@ export const HubCardView: React.FC<HubCardViewProps> = ({
   className = '',
 }) => {
   if (faceDown || !card) {
+    const theme = getModeTheme(variantId, flipSide);
     return (
       <motion.button
         type="button"
@@ -283,22 +231,24 @@ export const HubCardView: React.FC<HubCardViewProps> = ({
         disabled={!onClick}
         whileHover={onClick ? { y: -4, scale: 1.04 } : undefined}
         whileTap={onClick ? { scale: 0.96 } : undefined}
-        className={`relative select-none ${SIZE_MAP[size]} ${
-          flipSide === 'dark'
-            ? 'bg-gradient-to-br from-fuchsia-600 via-purple-700 to-teal-500 border-fuchsia-300/60'
-            : 'bg-gradient-to-br from-red-600 via-amber-500 to-red-700 border-amber-200/60'
-        } shadow-xl border flex items-center justify-center ${
+        className={`relative select-none ${SIZE_MAP[size]} bg-gradient-to-br ${theme.cardBackOuter} shadow-xl border flex items-center justify-center ${
           onClick ? 'cursor-pointer' : 'cursor-default'
         } ${className}`}
       >
         <div className="w-full h-full rounded-[inherit] bg-slate-950 flex items-center justify-center overflow-hidden relative border border-white/10">
-          <div className="w-[88%] h-[68%] rounded-[50%] bg-gradient-to-br from-red-600 via-amber-500 to-rose-600 -rotate-24 flex flex-col items-center justify-center shadow-inner border-2 border-white/80">
+          <div
+            className={`w-[88%] h-[68%] rounded-[50%] bg-gradient-to-br ${theme.cardBackOval} -rotate-24 flex flex-col items-center justify-center shadow-inner border-2 border-white/80`}
+          >
             <span
-              className={`font-display font-black italic text-white card-text-shadow leading-none ${
-                size === 'xs' ? 'text-[9px]' : size === 'sm' ? 'text-xs' : 'text-lg'
+              className={`font-display font-black italic text-white card-text-shadow leading-none text-center px-1 ${
+                size === 'xs'
+                  ? 'text-[7px]'
+                  : size === 'sm'
+                  ? 'text-[10px]'
+                  : 'text-sm sm:text-base'
               }`}
             >
-              UNO
+              {theme.cardBackLabel}
             </span>
           </div>
         </div>
@@ -366,12 +316,14 @@ export const HubCardView: React.FC<HubCardViewProps> = ({
           {corner}
         </div>
 
-        {/* Flex secondary color corner dot */}
+        {/* Flex secondary color diagonal corner wedge (distinct 2-color UNO Flex visual) */}
         {card.flexColor && (
           <div
             title={`Flex Color: ${card.flexColor}`}
-            className={`absolute top-1 right-1 w-3.5 h-3.5 rounded-full border-2 border-white shadow ${FLEX_DOT_BG[card.flexColor]}`}
-          />
+            className={`absolute top-0 right-0 w-7 h-7 sm:w-8 sm:h-8 rounded-bl-2xl border-l-2 border-b-2 border-white/90 shadow-lg flex items-center justify-center ${FLEX_DOT_BG[card.flexColor]}`}
+          >
+            <span className="text-[7px] font-black text-white drop-shadow">FLX</span>
+          </div>
         )}
 
         {/* Power Flip icon for UNO Flex */}
@@ -399,16 +351,6 @@ export const HubCardView: React.FC<HubCardViewProps> = ({
           </div>
         )}
 
-        {/* UNO House Rules: Speech Bubble Icon (Add-a-Rule trigger number) */}
-        {card.hasRuleBubble && (
-          <div
-            title="Kartu Gelembung Bicara (Add-a-Rule)"
-            className="absolute top-1 right-1 px-1 py-0.5 rounded bg-amber-400/95 text-[8px] font-black text-slate-950 shadow"
-          >
-            💬
-          </div>
-        )}
-
         {/* Liar's UNO: Face-Down Liar's Card Badge & Color-Blind Graphic Symbol */}
         {card.isLiarsCard && (
           <div
@@ -429,20 +371,7 @@ export const HubCardView: React.FC<HubCardViewProps> = ({
 
         {/* Center content */}
         <div className="relative z-10 flex flex-col items-center justify-center px-1 text-center">
-          {type === 'number' && (card.animal || card.emoji) ? (
-            <div className="flex flex-col items-center leading-none">
-              <span className={size === 'sm' ? 'text-2xl' : 'text-3xl sm:text-4xl'}>
-                {card.animal ?? card.emoji}
-              </span>
-              <span
-                className={`font-display font-black italic text-white card-text-shadow ${
-                  size === 'sm' ? 'text-base' : 'text-xl sm:text-2xl'
-                }`}
-              >
-                {value}
-              </span>
-            </div>
-          ) : type === 'number' ? (
+          {type === 'number' ? (
             <span
               className={`font-display font-black italic text-white card-text-shadow leading-none ${
                 size === 'xs'
@@ -466,10 +395,6 @@ export const HubCardView: React.FC<HubCardViewProps> = ({
               {type === 'wild_forced_swap' && <Shuffle className="w-6 h-6 sm:w-8 sm:h-8 text-white drop-shadow" />}
               {type === 'wild_target_draw2' && <Target className="w-6 h-6 sm:w-8 sm:h-8 text-white drop-shadow" />}
               {type.includes('team') && <Users className="w-6 h-6 sm:w-8 sm:h-8 text-white drop-shadow" />}
-              {type.includes('attack') || type === 'hit2' || type === 'wild_hit4' ? (
-                <Flame className="w-6 h-6 sm:w-8 sm:h-8 text-amber-200 drop-shadow" />
-              ) : null}
-              {type === 'clear' && <Sparkles className="w-6 h-6 sm:w-8 sm:h-8 text-lime-200 drop-shadow" />}
               {type === 'flex_draw2' && <Zap className="w-6 h-6 sm:w-8 sm:h-8 text-amber-200 drop-shadow" />}
               {(type === 'draw1' ||
                 type === 'draw2' ||

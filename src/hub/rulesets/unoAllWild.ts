@@ -246,7 +246,7 @@ export const unoAllWildRuleset: UnoRuleset = {
         // Official 2-player edge case: opponent skips 2 turns -> current player gets 2 consecutive extra turns!
         extraTurnsRemaining += 2;
         steps = 0;
-        message = `🚫🚫 WILD SKIP TWO (2 Pemain)! Lawan dilewati 2 giliran — ${current.name} mendapat 2 giliran berturut-turut!`;
+        message = `🚫🚫 WILD SKIP TWO (2 Pemain)! Lawan dilewati 2 giliran: ${current.name} mendapat 2 giliran berturut-turut!`;
       } else {
         steps = 3;
         message = `🚫🚫 WILD SKIP TWO! 2 pemain berikutnya langsung melewati giliran!`;
@@ -359,7 +359,7 @@ export const unoAllWildRuleset: UnoRuleset = {
   },
 
   checkWinCondition(state) {
-    const winner = state.players.find((p) => p.hand.length === 0);
+    const winner = state.players.find((p) => !p.isOut && !p.eliminated && p.hand.length === 0);
     if (!winner) return state;
     const pts = this.calculateScore(state, winner.id);
     return finalizeStandardRoundWin(state, winner.id, pts, 'Menghabiskan seluruh kartu Wild!');

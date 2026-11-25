@@ -13,6 +13,7 @@ import {
   transitionTurnWithPrivacy,
   uid,
 } from '../engine/core';
+import { resolveWinConditionMode } from '../engine/houseRules';
 import {
   CardFace,
   HubCard,
@@ -28,6 +29,7 @@ import {
 import {
   DARK_COLORS,
   STANDARD_COLORS,
+  finalizeStandardRoundWin,
   genericAIDecision,
   standardColorMatchValid,
 } from './baseHelpers';
@@ -89,7 +91,7 @@ function buildFlipDeck(): HubCard[] {
 }
 
 /**
- * Official UNO Flip! Scoring — calculated ONLY from the active side when the round ends:
+ * Official UNO Flip! Scoring: calculated ONLY from the active side when the round ends:
  * - Numbers 0-9: face value
  * - Draw One: 10
  * - Draw Five / Reverse / Skip / Flip: 20
@@ -369,7 +371,6 @@ export const unoFlipRuleset: UnoRuleset = {
     let eventType: string = 'play';
     let message = `${current.name} memainkan ${cType === 'number' ? `${getColorLabel(cColor)} ${cVal}` : cType.toUpperCase()}.`;
 
-    // === FLIP CARD (Official rule: flip entire Discard Pile & Draw Pile so the played Flip card moves to the BOTTOM of Discard Pile!) ===
     if (cType === 'flip') {
       flipSide = flipSide === 'light' ? 'dark' : 'light';
       // Reversing discardPile places the newly played Flip card at index 0 (bottom)
@@ -525,17 +526,28 @@ export const unoFlipRuleset: UnoRuleset = {
   },
 
   checkWinCondition(state) {
-    const winner = state.players.find((p) => p.hand.length === 0);
+    const winner = state.players.find((p) => !p.isOut && !p.eliminated && p.hand.length === 0);
     if (!winner) return state;
 
+    const winMode = resolveWinConditionMode(state.settings, state.players.length, state.variantId);
     const pointsAwarded = this.calculateScore(state, winner.id);
+
+    if (winMode === 'elimination') {
+      return finalizeStandardRoundWin(
+        state,
+        winner.id,
+        pointsAwarded,
+        `Menghabiskan kartu di ${state.flipSide === 'dark' ? 'Dark Side 🌙' : 'Light Side ☀️'}!`
+      );
+    }
+
     const updatedPlayers = state.players.map((p) =>
       p.id === winner.id ? { ...p, score: p.score + pointsAwarded } : p
     );
 
     const anyHitTarget = updatedPlayers.some((p) => p.score >= state.settings.targetScore);
     const isLowestMode = state.settings.flipScoringMode === 'lowest_at_500';
-    const reachedTarget = state.settings.singleRound || anyHitTarget;
+    const reachedTarget = winMode === 'quick_single' || anyHitTarget;
 
     let matchWinner = winner;
     if (reachedTarget && isLowestMode) {

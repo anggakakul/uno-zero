@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { App as UnoZeroApp } from '../App';
+import { App as UnoZeroApp, UnoZeroLaunchIntent } from '../App';
 import {
   getHubRoomCodeFromUrl,
   getRoomCodeFromUrl,
@@ -10,6 +10,7 @@ import {
 import { OnlinePlayerNotice } from '../types/game';
 import { getVariantMetadata } from './catalog';
 import { makeDefaultPlayers } from './engine/core';
+import { sanitizeAddOnPacksForVariant } from './expansions/addOnPacks';
 import { HubGamePage } from './pages/HubGamePage';
 import { HubHomePage } from './pages/HubHomePage';
 import { HubHowToPlayPage } from './pages/HubHowToPlayPage';
@@ -35,8 +36,6 @@ import {
   saveVariantGame,
 } from './storage';
 import {
-  AddOnPackId,
-  DigitalToolId,
   HubGameState,
   HubOnlineAction,
   HubOnlineRoomInfo,
@@ -61,11 +60,13 @@ export function UnoGameHubApp() {
   });
   const [returnScreen, setReturnScreen] = useState<HubScreen>('hub_home');
   const [selectedVariant, setSelectedVariant] = useState<VariantId>('uno-classic');
+  const [unoZeroLaunch, setUnoZeroLaunch] = useState<UnoZeroLaunchIntent | undefined>(() => {
+    const urlRoom = getRoomCodeFromUrl();
+    return urlRoom ? { action: 'online', joinCode: urlRoom } : undefined;
+  });
   const [pendingOnlineSettings, setPendingOnlineSettings] = useState<VariantSettings | undefined>(
     undefined
   );
-  const [selectedPacks, setSelectedPacks] = useState<AddOnPackId[]>([]);
-  const [selectedTools, setSelectedTools] = useState<DigitalToolId[]>([]);
   const [activeState, setActiveState] = useState<HubGameState | null>(null);
 
   // Server-authoritative Hub Online Room state
@@ -179,21 +180,9 @@ export function UnoGameHubApp() {
     }
   }, [activeState]);
 
-  const togglePack = (id: AddOnPackId) => {
-    setSelectedPacks((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  };
-
-  const toggleTool = (id: DigitalToolId) => {
-    setSelectedTools((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  };
-
   const handleSelectVariant = (variantId: VariantId) => {
     setSelectedVariant(variantId);
-    if (variantId === 'uno-zero') {
-      setScreen('uno_zero');
-    } else {
-      setScreen('variant_setup');
-    }
+    setScreen('variant_setup');
   };
 
   const handleOpenGuide = (variantId: VariantId) => {
@@ -283,9 +272,13 @@ export function UnoGameHubApp() {
     joinCode?: string
   ) => {
     const meta = getVariantMetadata(variantId);
+    const safeSettings: VariantSettings = {
+      ...settings,
+      activePacks: sanitizeAddOnPacksForVariant(variantId, settings.activePacks, true),
+    };
 
     if (mode === 'online') {
-      setPendingOnlineSettings(settings);
+      setPendingOnlineSettings(safeSettings);
       setSelectedVariant(variantId);
       setHubOnlineError(null);
       if (joinCode && joinCode.trim().length >= 4) {
@@ -294,7 +287,7 @@ export function UnoGameHubApp() {
         await handleCreateHubRoom(
           playerNames[0] || 'Host',
           variantId,
-          settings,
+          safeSettings,
           meta.minPlayers > 2,
           Math.max(meta.minPlayers, playerNames.length)
         );
@@ -304,7 +297,7 @@ export function UnoGameHubApp() {
 
     const ruleset = getRuleset(variantId);
     const playerInits = makeDefaultPlayers(playerNames, mode, meta.isTeamGame);
-    const fresh = ruleset.initializeGame(playerInits, mode, settings);
+    const fresh = ruleset.initializeGame(playerInits, mode, safeSettings);
     setHubRoom(null);
     setHubPlayerId(null);
     setActiveState(fresh);
@@ -334,7 +327,16 @@ export function UnoGameHubApp() {
   };
 
   if (screen === 'uno_zero') {
-    return <UnoZeroApp onBackToHub={() => setScreen('hub_home')} />;
+    return (
+      <UnoZeroApp
+        launchIntent={unoZeroLaunch}
+        onOpenGuide={() => handleOpenGuide('uno-zero')}
+        onBackToHub={() => {
+          setUnoZeroLaunch(undefined);
+          setScreen('hub_home');
+        }}
+      />
+    );
   }
 
   if (screen === 'settings') {
@@ -380,16 +382,31 @@ export function UnoGameHubApp() {
     );
   }
 
-  if (screen === 'variant_setup' && selectedVariant !== 'uno-zero') {
+  if (screen === 'variant_setup') {
     return (
       <HubVariantSetupPage
         variantId={selectedVariant}
-        defaultPacks={selectedPacks}
-        defaultTools={selectedTools}
-        onStartNewGame={(mode, names, settings, joinCode) =>
-          handleStartVariantGame(selectedVariant, mode, names, settings, joinCode)
-        }
-        onResumeSavedGame={() => handleResumeVariant(selectedVariant)}
+        onStartNewGame={(mode, names, settings, joinCode) => {
+          if (selectedVariant === 'uno-zero') {
+            setUnoZeroLaunch({
+              action: mode === 'online' ? 'online' : mode === 'ai' ? 'start_ai' : 'start_local',
+              playerNames: names,
+              totalRounds: settings.targetScore || 9,
+              joinCode,
+            });
+            setScreen('uno_zero');
+            return;
+          }
+          handleStartVariantGame(selectedVariant, mode, names, settings, joinCode);
+        }}
+        onResumeSavedGame={() => {
+          if (selectedVariant === 'uno-zero') {
+            setUnoZeroLaunch({ action: 'resume' });
+            setScreen('uno_zero');
+            return;
+          }
+          handleResumeVariant(selectedVariant);
+        }}
         onOpenGuide={() => handleOpenGuide(selectedVariant)}
         onBack={() => setScreen('hub_home')}
       />
@@ -437,10 +454,6 @@ export function UnoGameHubApp() {
 
   return (
     <HubHomePage
-      selectedPacks={selectedPacks}
-      selectedTools={selectedTools}
-      onTogglePack={togglePack}
-      onToggleTool={toggleTool}
       onSelectVariant={handleSelectVariant}
       onOpenGuide={handleOpenGuide}
       onOpenSettings={() => setScreen('settings')}

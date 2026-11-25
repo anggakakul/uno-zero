@@ -502,10 +502,10 @@ export const dosModeRuleset: UnoRuleset = {
       move.pileIndex !== undefined
         ? move.pileIndex
         : piles.findIndex((p, idx) => {
-            if (alreadyMatched.has(idx)) return false;
-            const top = p[p.length - 1];
-            return top && cardMatchesCenterCard(c1, c2, top);
-          });
+          if (alreadyMatched.has(idx)) return false;
+          const top = p[p.length - 1];
+          return top && cardMatchesCenterCard(c1, c2, top);
+        });
     if (pileIdx < 0) return state;
 
     const top = piles[pileIdx][piles[pileIdx].length - 1];
@@ -535,10 +535,10 @@ export const dosModeRuleset: UnoRuleset = {
     const matchLabel = isDoubleColorMatch
       ? '🌈 DOUBLE COLOR MATCH (+1 buang Center Row & semua lawan +1!)'
       : isSingleColorMatch
-      ? '🎨 SINGLE COLOR MATCH (+1 buang Center Row!)'
-      : c2
-      ? '✌️ DOUBLE MATCH'
-      : '✌️ SINGLE MATCH';
+        ? '🎨 SINGLE COLOR MATCH (+1 buang Center Row!)'
+        : c2
+          ? '✌️ DOUBLE MATCH'
+          : '✌️ SINGLE MATCH';
 
     const staged = appendEvent(
       {
@@ -576,7 +576,7 @@ export const dosModeRuleset: UnoRuleset = {
   },
 
   checkWinCondition(state) {
-    const winner = state.players.find((p) => p.hand.length === 0);
+    const winner = state.players.find((p) => !p.isOut && !p.eliminated && p.hand.length === 0);
     if (!winner) return state;
     const pts = this.calculateScore(state, winner.id);
     return finalizeStandardRoundWin(
@@ -646,12 +646,12 @@ export const dosModeRuleset: UnoRuleset = {
     const piles = state.dosCenterPiles ?? [];
     const canMatchNow = Boolean(
       drawn &&
-        piles.some((p) => {
-          const top = p[p.length - 1];
-          if (!top) return false;
-          if (cardMatchesCenterCard(drawn, undefined, top)) return true;
-          return newHand.some((other) => other.id !== drawn.id && cardMatchesCenterCard(drawn, other, top));
-        })
+      piles.some((p) => {
+        const top = p[p.length - 1];
+        if (!top) return false;
+        if (cardMatchesCenterCard(drawn, undefined, top)) return true;
+        return newHand.some((other) => other.id !== drawn.id && cardMatchesCenterCard(drawn, other, top));
+      })
     );
 
     if (canMatchNow && !current.isAI) {

@@ -141,7 +141,7 @@ export function calculateUnoFlexHandPoints(hand: HubCard[]): number {
 
 /**
  * Official UNO Flex Setup:
- * - Every player gets 1 Power Card starting on GREEN (On / ✓) — max 8 players.
+ * - Every player gets 1 Power Card starting on GREEN (On / ✓): max 8 players.
  * - Deal 7 cards each.
  * - First Discard Pile card MUST be a numbered card; any Action/Wild card is returned to bottom of Draw Pile!
  */
@@ -399,7 +399,6 @@ export const unoFlexRuleset: UnoRuleset = {
     let eventType: string = usingFlex ? 'flex' : 'play';
     let message = `${current.name} memainkan ${card.type === 'number' ? `${getColorLabel(activeColor)} ${card.value}` : card.type.toUpperCase()}${usingFlex ? ' [FLEX ⚡]' : ''}.`;
 
-    // === STANDARD ACTION CARDS (No Flex Side) ===
     if (card.type === 'skip') {
       steps = 2;
       eventType = 'skip';
@@ -425,7 +424,6 @@ export const unoFlexRuleset: UnoRuleset = {
       eventType = 'power_flip';
       message = `🔄 WILD ALL FLIP (${getColorLabel(activeColor)})! Power Card SEMUA pemain dibalik (On ↔ Off)!`;
     }
-    // === UNIQUE FLEX ACTION CARDS ===
     else if (card.type === 'flex_skip') {
       if (usingFlex) {
         steps = 0; // Skip ALL other players -> actor goes again!
@@ -469,7 +467,6 @@ export const unoFlexRuleset: UnoRuleset = {
         message = `${current.name} memainkan DRAW +2 (Regular)! ${players[victimIdx].name} ambil 2 kartu & dilewati.`;
       }
     }
-    // === FLEX WILD CARDS ===
     else if (card.type === 'wild_all_draw') {
       if (usingFlex) {
         // Flex side: ALL other players draw 2 cards; next player NOT skipped!
@@ -606,7 +603,7 @@ export const unoFlexRuleset: UnoRuleset = {
   },
 
   checkWinCondition(state) {
-    const winner = state.players.find((p) => p.hand.length === 0);
+    const winner = state.players.find((p) => !p.isOut && !p.eliminated && p.hand.length === 0);
     if (!winner) return state;
     const pts = this.calculateScore(state, winner.id);
     return finalizeStandardRoundWin(state, winner.id, pts, 'Menghabiskan seluruh kartu di tangan!');

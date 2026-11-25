@@ -5,9 +5,39 @@ import {
   getNextPlayerIndex,
   uid,
 } from '../engine/core';
-import { AddOnPackId, HubCard, HubCardColor, HubGameState } from '../types';
+import { AddOnPackId, HubCard, HubCardColor, HubGameState, VariantId } from '../types';
 
 const BASE_COLORS: HubCardColor[] = ['red', 'yellow', 'green', 'blue'];
+
+export const ADDON_SUPPORTED_VARIANT: VariantId = 'uno-classic';
+export const ADDON_CLASSIC_ONLY_NOTICE =
+  'UNO Add-On Packs hanya tersedia dan dapat digabungkan pada mode permainan UNO Classic.';
+
+/** Strict Mattel compatibility guard: Add-On Packs are ONLY supported in UNO Classic */
+export function isAddOnPackSupported(variantId: VariantId): boolean {
+  return variantId === ADDON_SUPPORTED_VARIANT;
+}
+
+/**
+ * Defensive sanitizer: strips any Add-On Packs when variantId !== 'uno-classic'
+ * and optionally logs a console warning to prevent cross-variant rule collisions.
+ */
+export function sanitizeAddOnPacksForVariant(
+  variantId: VariantId,
+  activePacks?: AddOnPackId[],
+  warnOnStrip = false
+): AddOnPackId[] {
+  if (!activePacks || activePacks.length === 0) return [];
+  if (!isAddOnPackSupported(variantId)) {
+    if (warnOnStrip) {
+      console.warn(
+        `[UNO Add-On Guard] Mengabaikan ${activePacks.length} Add-On Pack (${activePacks.join(', ')}) pada mode "${variantId}". ${ADDON_CLASSIC_ONLY_NOTICE}`
+      );
+    }
+    return [];
+  }
+  return Array.from(new Set(activePacks));
+}
 
 /**
  * Injects EXACTLY 16 cards per enabled Add-On Expansion Pack into the deck!
@@ -138,7 +168,7 @@ export function isAddOnCardType(type: string): boolean {
 
 /**
  * Checks reactive defense (Shield Block / Mirror Deflect / Wild Fortress)
- * OR Power Grab immunity when a player is targeted by an action/penalty!
+ * when a player is targeted by an action/penalty!
  */
 export function checkDefenseOrImmunity(
   state: HubGameState,
@@ -155,15 +185,15 @@ export function checkDefenseOrImmunity(
     return { blocked: false, reflected: false, state };
   }
 
-  // 1. UNO Power Grab OR Wild Fortress immunity
-  if (state.toolState?.powerHolderId === victimId || (victim.fortressTurns ?? 0) > 0) {
+  // 1. Wild Fortress immunity
+  if ((victim.fortressTurns ?? 0) > 0) {
     return {
       blocked: true,
       reflected: false,
       state: appendEvent(
         state,
         'power_immune',
-        `🏰 KEBAL SERANGAN! ${victim.name} dilindungi oleh ${(victim.fortressTurns ?? 0) > 0 ? 'Wild Fortress' : 'Token Power Grab'}!`
+        `🏰 KEBAL SERANGAN! ${victim.name} dilindungi oleh Wild Fortress!`
       ),
     };
   }
@@ -223,7 +253,7 @@ export function checkDefenseOrImmunity(
   return { blocked: false, reflected: false, state };
 }
 
-/** Resolve Wild Reflex Race ("TAP CEPAT!") — slowest player draws 2 cards! */
+/** Resolve Wild Reflex Race ("TAP CEPAT!"): slowest player draws 2 cards! */
 export function resolveReflexRaceTap(state: HubGameState, playerId: string): HubGameState {
   const race = state.reflexRaceActive;
   if (!race) return state;
@@ -290,7 +320,6 @@ export function resolveAddOnCardEffect(
   let drawnTogetherPair = state.drawnTogetherPair ?? null;
   let msg = `${actor.name} memainkan ${card.type.toUpperCase()}!`;
 
-  // === 1. REVERSE PACK ===
   if (card.type === 'reverse_draw2') {
     direction = (direction * -1) as 1 | -1;
     const victimIdx = getNextPlayerIndex(players, actorIdx, direction, 1);
@@ -316,9 +345,8 @@ export function resolveAddOnCardEffect(
   } else if (card.type === 'wild_reverse_all_skip') {
     direction = (direction * -1) as 1 | -1;
     steps = 0;
-    msg = `🌪️ WILD REVERSE ALL-SKIP (${getColorLabel(activeColor)})! Arah dibalik & semua pemain dilewati — giliran kembali ke ${actor.name}!`;
+    msg = `🌪️ WILD REVERSE ALL-SKIP (${getColorLabel(activeColor)})! Arah dibalik & semua pemain dilewati: giliran kembali ke ${actor.name}!`;
   }
-  // === 2. STACK PACK ===
   else if (card.type === 'stack_plus3' || card.type === 'stack_plus2' || card.type === 'stack_plus4') {
     const val = card.type === 'stack_plus4' ? 4 : card.type === 'stack_plus3' ? 3 : 2;
     pendingDrawCount += val;
@@ -349,7 +377,6 @@ export function resolveAddOnCardEffect(
       msg = `🎯 WILD STACK TRANSFER (${getColorLabel(activeColor)}) dimainkan sebagai Wild!`;
     }
   }
-  // === 3. SWAP PACK ===
   else if (card.type === 'swap_target') {
     const targetIdx =
       players.findIndex((p) => p.id === targetPlayerId) >= 0
@@ -393,7 +420,6 @@ export function resolveAddOnCardEffect(
       msg = `🎲 WILD BLIND TRADE (${getColorLabel(activeColor)})! ${actor.name} menukar ${giveCount} kartu dengan ${takeCount} kartu acak milik ${target.name}!`;
     }
   }
-  // === 4. SPEED PACK ===
   else if (card.type === 'speed_drop') {
     const sameColorNums = actor.hand.filter((c) => c.type === 'number' && c.color === card.color).slice(0, 2);
     if (sameColorNums.length > 0) {
@@ -408,12 +434,11 @@ export function resolveAddOnCardEffect(
     }
   } else if (card.type === 'wild_reflex_race') {
     reflexRaceActive = { startedAt: Date.now(), tappedPlayerIds: [], secondsLeft: 3 };
-    msg = `🏁 WILD REFLEX RACE (${getColorLabel(activeColor)})! TEKAN "TAP CEPAT!" DALAM 3 DETIK — yang terlambat ambil +2 kartu!`;
+    msg = `🏁 WILD REFLEX RACE (${getColorLabel(activeColor)})! TEKAN "TAP CEPAT!" DALAM 3 DETIK: yang terlambat ambil +2 kartu!`;
   } else if (card.type === 'blitz_turn') {
     blitzTurnsRemaining = players.length;
     msg = `⏱️ BLITZ TURN AKTIF! 1 putaran penuh dengan batas waktu 5 detik per giliran!`;
   }
-  // === 5. DEFENSE PACK ===
   else if (card.type === 'wild_fortress') {
     players = players.map((p, idx) =>
       idx === actorIdx ? { ...p, fortressTurns: players.length } : p
@@ -422,7 +447,6 @@ export function resolveAddOnCardEffect(
   } else if (card.type === 'shield_block' || card.type === 'mirror_deflect') {
     msg = `🛡️ ${actor.name} memainkan ${card.type === 'mirror_deflect' ? 'Mirror Deflect' : 'Shield Block'} (${getColorLabel(activeColor)}).`;
   }
-  // === 6. COMEBACK PACK ===
   else if (card.type === 'underdog_relief' || card.type === 'comeback_boost') {
     const others = players.filter((p) => p.id !== actor.id);
     const avg = others.length > 0 ? others.reduce((s, p) => s + p.hand.length, 0) / others.length : 0;
@@ -450,7 +474,7 @@ export function resolveAddOnCardEffect(
       );
       msg = `🏹 ROBIN HOOD BALANCE! ${fewest.name} (kartu tersedikit) wajib ambil +${res.drawn.length} kartu agar seimbang!`;
     } else {
-      msg = `🏹 ROBIN HOOD BALANCE dimainkan — jumlah kartu sudah seimbang!`;
+      msg = `🏹 ROBIN HOOD BALANCE dimainkan: jumlah kartu sudah seimbang!`;
     }
   } else if (card.type === 'wild_second_wind') {
     if (actor.hand.length >= 7) {
@@ -468,7 +492,6 @@ export function resolveAddOnCardEffect(
       msg = `🌬️ WILD SECOND WIND (${getColorLabel(activeColor)}) dimainkan!`;
     }
   }
-  // === 7. FRENEMIES PACK ===
   else if (card.type === 'frenemy_alliance') {
     const partnerIdx =
       players.findIndex((p) => p.id === targetPlayerId) >= 0

@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { makeDefaultPlayers } from '../engine/core';
 import {
   checkDefenseOrImmunity,
   injectAddOnPackCards,
+  isAddOnPackSupported,
   resolveAddOnCardEffect,
+  sanitizeAddOnPacksForVariant,
 } from '../expansions/addOnPacks';
 import {
   ADDON_PRESET_MODES,
@@ -16,19 +18,6 @@ import {
   recordComebackUnoLetter,
   triggerComebackUnoCombo,
 } from '../expansions/packSystemEngine';
-import {
-  OVERDRIVE_TOOL_PRESETS,
-  applyTippoDrop,
-  createInitialToolState,
-  getTippoCardWeight,
-  grabOrStealPowerRelic,
-  resolveFlashReflex,
-  triggerBlastLauncher,
-  triggerJackpotRoller,
-  triggerOverchargeBlast,
-  triggerRobotoDirectorCheck,
-  triggerSpinWheel,
-} from '../expansions/digitalTools';
 import { getRuleset } from '../rulesets';
 import {
   calculateDosHandPoints,
@@ -37,39 +26,6 @@ import {
   placeDosCenterDiscard,
 } from '../rulesets/dosMode';
 import { computeNextOnoTotal, ono99Ruleset } from '../rulesets/ono99';
-import {
-  DARE_LISTS_BY_CATEGORY,
-  breakEmojiHold,
-  calculateDareEmojiHandPoints,
-  maintainEmojiExpression,
-  unoDareEmojiRuleset,
-} from '../rulesets/unoDareEmoji';
-import { unoExpressRuleset } from '../rulesets/unoExpress';
-import {
-  GOLF_TOTAL_ROUNDS,
-  calculateGolfGridScore,
-  catchGolfUno,
-  clearMatchingGolfColumns,
-  countFaceDownGolfCards,
-  getGolfCardPoints,
-  golfDiscardDrawn,
-  golfTakeDiscard,
-  golfTakeDraw,
-  unoGolfRuleset,
-} from '../rulesets/unoGolf';
-import {
-  HEARTS_TARGET_LIMIT,
-  getHeartCardRank,
-  getHeartPenaltyPoints,
-  unoHeartsRuleset,
-} from '../rulesets/unoHearts';
-import {
-  MAX_HOUSE_RULES,
-  attemptHouseRemixJumpIn,
-  calculateHouseRemixHandPoints,
-  completeRuleQTE,
-  unoHouseRemixRuleset,
-} from '../rulesets/unoHouseRemix';
 import {
   calculateLiarsHandPoints,
   challengeLiarsClaim,
@@ -82,22 +38,10 @@ import {
   takePartyPileUp,
   unoPartyRuleset,
 } from '../rulesets/unoParty';
-import {
-  calculateRummyRackPoints,
-  commitRummyTurn,
-  findAvailableMeld,
-  isValidRummyRun,
-  isValidRummySet,
-  layOffCardToMeld,
-  playRummyMeld,
-  revertRummyTurn,
-  substituteWildOnBoard,
-  unoRummyUpRuleset,
-} from '../rulesets/unoRummyUp';
 import { AddOnPackId } from '../types';
 
-describe('UNO GAME HUB — Exact Specs for Packs, Tools & Modes', () => {
-  describe('BAGIAN A — 7 Add-On Expansion Packs (Exact 16 cards each)', () => {
+describe('UNO GAME HUB: Exact Specs for Packs & Modes', () => {
+  describe('BAGIAN A: 7 Add-On Expansion Packs (Exact 16 cards each)', () => {
     it('injects EXACTLY 16 cards for each of the 7 packs (112 total)', () => {
       const allPacks: AddOnPackId[] = [
         'reverse-pack',
@@ -113,6 +57,60 @@ describe('UNO GAME HUB — Exact Specs for Packs, Tools & Modes', () => {
         expect(injected).toHaveLength(16);
       }
       expect(injectAddOnPackCards([], allPacks)).toHaveLength(112);
+    });
+
+    it('strictly restricts Add-On Packs to UNO Classic only (defensive deck guard, exact 16-card injection, resetRound preservation & non-classic rejection)', () => {
+      expect(isAddOnPackSupported('uno-classic')).toBe(true);
+      expect(isAddOnPackSupported('uno-flip')).toBe(false);
+      expect(isAddOnPackSupported('uno-no-mercy')).toBe(false);
+      expect(isAddOnPackSupported('dos-mode')).toBe(false);
+      expect(isAddOnPackSupported('ono-99')).toBe(false);
+
+      // UNO Classic: 108 base + 2 packs * 16 = 140 exact total cards in initializeGame & resetRound
+      const players = makeDefaultPlayers(['P1', 'P2', 'P3'], 'ai');
+      const classicRuleset = getRuleset('uno-classic');
+      const classicState = classicRuleset.initializeGame(players, 'ai', {
+        targetScore: 500,
+        singleRound: false,
+        activePacks: ['reverse-pack', 'stack-pack'],
+      });
+      const countTotalCards = (s: typeof classicState) =>
+        s.players.reduce((sum, p) => sum + p.hand.length, 0) +
+        s.drawPile.length +
+        s.discardPile.length;
+
+      expect(classicState.settings.activePacks).toEqual(['reverse-pack', 'stack-pack']);
+      expect(countTotalCards(classicState)).toBe(108 + 32);
+
+      // Subsequent round (resetRound) preserves all 140 cards cleanly
+      const round2 = classicRuleset.resetRound(classicState);
+      expect(countTotalCards(round2)).toBe(108 + 32);
+      expect(round2.settings.activePacks).toEqual(['reverse-pack', 'stack-pack']);
+
+      // Non-Classic variants MUST reject/ignore activePacks and log a warning
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const flipRuleset = getRuleset('uno-flip');
+        const flipDeck = flipRuleset.createDeck({
+          targetScore: 500,
+          singleRound: true,
+          activePacks: ['stack-pack', 'swap-pack'],
+        });
+        expect(flipDeck).toHaveLength(112); // Untouched UNO Flip deck!
+        expect(warnSpy).toHaveBeenCalled();
+
+        const noMercyState = getRuleset('uno-no-mercy').initializeGame(players, 'ai', {
+          targetScore: 1000,
+          singleRound: true,
+          activePacks: ['reverse-pack'],
+        });
+        expect(noMercyState.settings.activePacks).toEqual([]);
+        expect(countTotalCards(noMercyState)).toBe(168); // Untouched No Mercy deck!
+
+        expect(sanitizeAddOnPacksForVariant('dos-mode', ['speed-pack'])).toEqual([]);
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
 
     it('resolves Stack Multiplier x2, Defense Mirror Deflect, Shield Block & Wild Fortress', () => {
@@ -226,60 +224,7 @@ describe('UNO GAME HUB — Exact Specs for Packs, Tools & Modes', () => {
     });
   });
 
-  describe('BAGIAN B — Exact Math: UNO Tippo, DOS & ONO 99', () => {
-    it('UNO Tippo calculates exact card weights (1/2/3/4) and tips when Selisih > Batas Kritis', () => {
-      expect(getTippoCardWeight({ id: 'a', color: 'red', type: 'number', value: 3 })).toBe(1);
-      expect(getTippoCardWeight({ id: 'b', color: 'red', type: 'number', value: 8 })).toBe(2);
-      expect(getTippoCardWeight({ id: 'c', color: 'red', type: 'skip' })).toBe(3);
-      expect(getTippoCardWeight({ id: 'd', color: 'wild', type: 'wild_draw4' })).toBe(4);
-
-      const players = makeDefaultPlayers(['P1', 'P2'], 'ai');
-      const state = getRuleset('uno-classic').initializeGame(players, 'ai', {
-        targetScore: 500,
-        singleRound: true,
-        activeTools: ['uno-tippo', 'uno-spin', 'uno-jackpot', 'uno-power-grab', 'uno-roboto-flash', 'uno-blast'],
-      });
-      const fixedThresholdState = {
-        ...state,
-        toolState: { ...createInitialToolState(state.settings), tippoThreshold: 6 },
-      };
-      const wildCard = { id: 'w1', color: 'wild' as const, type: 'wild' as const }; // weight 4
-      const drop1 = applyTippoDrop(fixedThresholdState, wildCard, 'p_1', 'left'); // left=4, diff=4 <= 6
-      expect(drop1.toolState?.tippoLeftWeight).toBe(4);
-      const drop2 = applyTippoDrop(drop1, wildCard, 'p_1', 'left'); // left=8, diff=8 > 6 -> TIPPED!
-      expect(drop2.toolState?.tippoLeftWeight).toBe(0);
-      expect(drop2.players[0].hand.length).toBe(state.players[0].hand.length + 3);
-
-      // Verify other tools still work cleanly
-      expect(triggerSpinWheel(state, 'p_1', () => 0.1).toolState?.lastSpin).toBeTruthy();
-      expect(triggerJackpotRoller(state, 'p_1', () => 0.1).toolState?.lastJackpot?.reels).toHaveLength(3);
-      expect(resolveFlashReflex(state, 'p_1', false).players[0].hand.length).toBe(state.players[0].hand.length + 2);
-      expect(triggerBlastLauncher(state, 'p_1', () => 0.1).players[0].hand.length).toBeGreaterThan(state.players[0].hand.length);
-
-      // UNO OVERDRIVE: 2 Presets, 4-Relic U-N-O-! Instant Win, Overcharge Launcher & Roboto Director!
-      expect(OVERDRIVE_TOOL_PRESETS).toHaveLength(2);
-      let rState = grabOrStealPowerRelic(state, 'p_1', 'U');
-      rState = grabOrStealPowerRelic(rState, 'p_1', 'N');
-      rState = grabOrStealPowerRelic(rState, 'p_1', 'O');
-      rState = grabOrStealPowerRelic(rState, 'p_1', '!');
-      expect(rState.phase).toBe('game_over');
-      expect(rState.winnerId).toBe('p_1');
-
-      // Overcharge Lv.3: 70% +8 attack, 30% backfire (+4 to actor)
-      expect(triggerOverchargeBlast(state, 'p_1', 3, () => 0.5).pendingDrawCount).toBe(8);
-      expect(triggerOverchargeBlast(state, 'p_1', 3, () => 0.1).players[0].hand.length).toBe(state.players[0].hand.length + 4);
-
-      // Roboto Rubber-Banding Director detects leader <= 2 vs trailing >= 8
-      const dirState = triggerRobotoDirectorCheck({
-        ...state,
-        players: [
-          { ...state.players[0], hand: state.players[0].hand.slice(0, 2) },
-          { ...state.players[1], hand: [...state.players[1].hand, ...state.players[1].hand] },
-        ],
-      });
-      expect(dirState.toolState?.robotoRule?.targetName).toBe('P1');
-    });
-
+  describe('BAGIAN B: Exact Math: DOS & ONO 99', () => {
     it('DOS enforces 108-card deck (no regular 2), multi-pile matching, strict refill-before-bonus-discard sequence & official 20/40 scoring', () => {
       const deck = dosModeRuleset.createDeck({ targetScore: 200, singleRound: false });
       expect(deck).toHaveLength(108);
@@ -422,271 +367,7 @@ describe('UNO GAME HUB — Exact Specs for Packs, Tools & Modes', () => {
     });
   });
 
-  describe('BAGIAN C — Exact Rules: Golf, Rummy-Up, Hearts, Party, Liars, House/Remix, Dare/Emoji, Express', () => {
-    it('UNO Golf enforces 112-card deck, 1 random face-up, Discard validation, Column Clear (color/value), Dynamic Grid Draw2/DoubleDraw2, UNO penalty & 9 rounds', () => {
-      expect(GOLF_TOTAL_ROUNDS).toBe(9);
-      const deck = unoGolfRuleset.createDeck({ targetScore: 9, singleRound: false });
-      expect(deck).toHaveLength(112);
-      expect(deck.filter((c) => c.type === 'double_draw2')).toHaveLength(8);
-
-      // Action cards have higher penalty than 0-9 number cards
-      expect(getGolfCardPoints({ id: 'r', color: 'red', type: 'reverse' })).toBeGreaterThan(9);
-      expect(getGolfCardPoints({ id: 's', color: 'red', type: 'skip' })).toBeGreaterThan(9);
-      expect(getGolfCardPoints({ id: 'd', color: 'red', type: 'draw2' })).toBeGreaterThan(9);
-      expect(getGolfCardPoints({ id: 'dd', color: 'red', type: 'double_draw2' })).toBeGreaterThan(9);
-
-      // Column-major pairs: Col 0 (0,1) same value (8 & 8 -> cleared), Col 1 (2,3) same color (green & green -> cleared), Col 2 (4,5) unmatched (2 + 1 = 3)
-      const slots = [
-        { card: { id: 'c0', color: 'red' as const, type: 'number' as const, value: 8 }, faceUp: true },
-        { card: { id: 'c1', color: 'yellow' as const, type: 'number' as const, value: 8 }, faceUp: true },
-        { card: { id: 'c2', color: 'green' as const, type: 'number' as const, value: 4 }, faceUp: true },
-        { card: { id: 'c3', color: 'green' as const, type: 'number' as const, value: 9 }, faceUp: true },
-        { card: { id: 'c4', color: 'blue' as const, type: 'number' as const, value: 2 }, faceUp: true },
-        { card: { id: 'c5', color: 'red' as const, type: 'number' as const, value: 1 }, faceUp: true },
-      ];
-      const cleared = clearMatchingGolfColumns(slots);
-      expect(cleared.clearedCount).toBe(2);
-      expect(cleared.remaining).toHaveLength(2);
-      expect(calculateGolfGridScore(slots, true)).toBe(3);
-
-      // Setup: 6 cards in 2x3 grid, EXACTLY 1 face-up, left of dealer starts (index 1)
-      const state = unoGolfRuleset.initializeGame(makeDefaultPlayers(['A', 'B', 'C'], 'ai'), 'ai', {
-        targetScore: 9,
-        singleRound: false,
-      });
-      expect(state.players[0].golfSlots).toHaveLength(6);
-      expect(countFaceDownGolfCards(state.players[0].golfSlots)).toBe(5);
-      expect(state.currentPlayerIndex).toBe(1);
-
-      // Discard Pile validation: Action Card CANNOT be taken!
-      const actionDiscard = {
-        ...state,
-        currentPlayerIndex: 0,
-        discardPile: [{ id: 'act1', color: 'red' as const, type: 'skip' as const }],
-      };
-      const blocked = golfTakeDiscard(actionDiscard, 'p_1');
-      expect(blocked.golfDrawnCard).toBeNull();
-
-      // Number card from Discard CAN be taken, MUST swap with face-down (rejects face-up!)
-      const numDiscard = {
-        ...state,
-        currentPlayerIndex: 0,
-        discardPile: [{ id: 'num1', color: 'blue' as const, type: 'number' as const, value: 2 }],
-      };
-      const picked = golfTakeDiscard(numDiscard, 'p_1');
-      expect(picked.golfDrawnCard?.source).toBe('discard');
-      const faceUpIdx = picked.players[0].golfSlots!.findIndex((s) => s.faceUp);
-      const faceDownIdx = picked.players[0].golfSlots!.findIndex((s) => !s.faceUp);
-      expect(unoGolfRuleset.validateMove(picked, 'p_1', { cardId: '', golfSlotIndex: faceUpIdx }).valid).toBe(false);
-      expect(unoGolfRuleset.validateMove(picked, 'p_1', { cardId: '', golfSlotIndex: faceDownIdx }).valid).toBe(true);
-
-      // Draw Pile -> discarding Draw 2 adds 2 face-down cards to next player's grid & skips them!
-      const draw2Top = { id: 'd2top', color: 'red' as const, type: 'draw2' as const };
-      const withD2 = { ...state, currentPlayerIndex: 0, drawPile: [...state.drawPile, draw2Top] };
-      const drawnD2 = golfTakeDraw(withD2, 'p_1');
-      const afterD2 = golfDiscardDrawn(drawnD2, 'p_1');
-      expect(afterD2.players[1].golfSlots).toHaveLength(8); // Dynamic 4th column added!
-      expect(afterD2.currentPlayerIndex).toBe(2); // P2 skipped!
-
-      // Double Draw 2 -> choose 2 players (+2 each) and NOBODY loses their turn!
-      const dd2Top = { id: 'dd2top', color: 'green' as const, type: 'double_draw2' as const };
-      const withDD2 = { ...state, currentPlayerIndex: 0, drawPile: [...state.drawPile, dd2Top] };
-      const drawnDD2 = golfTakeDraw(withDD2, 'p_1');
-      const promptDD2 = golfDiscardDrawn(drawnDD2, 'p_1');
-      expect(promptDD2.phase).toBe('golf_double_draw2');
-      const resolvedDD2 = unoGolfRuleset.resolvePrompt(promptDD2, {
-        targetPlayerId: 'p_2',
-        secondTargetPlayerId: 'p_3',
-      });
-      expect(resolvedDD2.players[1].golfSlots).toHaveLength(8);
-      expect(resolvedDD2.players[2].golfSlots).toHaveLength(8);
-      expect(resolvedDD2.currentPlayerIndex).toBe(1); // Nobody skipped!
-
-      // UNO! Penalty adds +2 face-down cards to grid
-      const caught = catchGolfUno({ ...state, unoVulnerablePlayerId: 'p_1' }, 'B');
-      expect(caught.players[0].golfSlots).toHaveLength(8);
-      expect(caught.unoVulnerablePlayerId).toBeNull();
-    });
-
-    it('UNO Rummy-Up enforces 100-tile deck, 14-tile racks, 4 Starting Tiles, Run/Set & Non-Consecutive Wild validators, Wild Substitution + Revert & Empty Pool Tie-Breaker', () => {
-      const deck = unoRummyUpRuleset.createDeck({ targetScore: 200, singleRound: false });
-      expect(deck).toHaveLength(100); // 72 Number + 24 Word/Number (#2,#5,#7) + 4 Wild Draw Four!
-      expect(deck.filter((t) => t.type === 'wild_draw4')).toHaveLength(4);
-      expect(deck.filter((t) => t.type === 'draw2' && t.value === 2)).toHaveLength(8);
-      expect(deck.filter((t) => t.type === 'skip' && t.value === 5)).toHaveLength(8);
-      expect(deck.filter((t) => t.type === 'reverse' && t.value === 7)).toHaveLength(8);
-
-      // Run & Set Validators (Set max 1 Wild, Run no consecutive Wilds & 1..12 bounds!)
-      const w1 = { id: 'w1', color: 'wild' as const, type: 'wild_draw4' as const };
-      const w2 = { id: 'w2', color: 'wild' as const, type: 'wild_draw4' as const };
-      const r4 = { id: 'r4', color: 'red' as const, type: 'number' as const, value: 4 };
-      const r6 = { id: 'r6', color: 'red' as const, type: 'number' as const, value: 6 };
-      const r8 = { id: 'r8', color: 'red' as const, type: 'number' as const, value: 8 };
-      const r11 = { id: 'r11', color: 'red' as const, type: 'number' as const, value: 11 };
-      const r12 = { id: 'r12', color: 'red' as const, type: 'number' as const, value: 12 };
-      const b4 = { id: 'b4', color: 'blue' as const, type: 'number' as const, value: 4 };
-      const g4 = { id: 'g4', color: 'green' as const, type: 'number' as const, value: 4 };
-
-      expect(isValidRummySet([r4, b4, w1])).toBe(true);
-      expect(isValidRummySet([r4, w1, w2])).toBe(false); // Max 1 Wild in Set!
-      expect(isValidRummyRun([r4, w1, r6, w2, r8])).toBe(true); // Non-consecutive Wilds allowed!
-      expect(isValidRummyRun([r4, w1, w2, r8])).toBe(false); // Adjacent Wilds FORBIDDEN!
-      expect(isValidRummyRun([r11, r12, w1])).toBe(false); // Out of 1..12 bounds!
-
-      // Setup: 14 tiles/rack + 4 Starting Tiles (effectConsumed = true)
-      const state = unoRummyUpRuleset.initializeGame(makeDefaultPlayers(['A', 'B'], 'ai'), 'ai', {
-        targetScore: 200,
-        singleRound: false,
-        rummyScoringMode: 'points_200',
-      });
-      expect(state.players[0].hand).toHaveLength(14);
-      expect(state.rummyMelds).toHaveLength(4);
-      expect(state.rummyMelds?.every((m) => m.kind === 'starting_single' && m.cards[0].rummyEffectConsumed)).toBe(true);
-
-      // Meld + Lay Off + Wild Substitution (must use freed Wild before commit!) + Revert
-      const r5 = { id: 'r5', color: 'red' as const, type: 'skip' as const, value: 5, rummyEffectConsumed: false };
-      const r7 = { id: 'r7', color: 'red' as const, type: 'reverse' as const, value: 7, rummyEffectConsumed: false };
-      const meldPrep = {
-        ...state,
-        currentPlayerIndex: 0,
-        rummyMelds: [{ id: 'm_wild', ownerName: 'Meja', kind: 'set' as const, cards: [r4, b4, w1] }],
-        players: state.players.map((p, i) => (i === 0 ? { ...p, hand: [r4, r5, r6, r7, g4] } : p)),
-      };
-      expect(findAvailableMeld(meldPrep.players[0].hand)).toBeTruthy();
-
-      // Substitute g4 for w1 on board -> commit BLOCKED while w1 is still pending, then Revert restores!
-      const subbed = substituteWildOnBoard(meldPrep, 'p_1', 'm_wild', 'g4');
-      expect(subbed.rummyTransaction?.pendingSubstitutedWildIds).toContain('w1');
-      const blockedCommit = commitRummyTurn(subbed, 'p_1');
-      expect(blockedCommit.rummyTransaction).not.toBeNull(); // Blocked!
-      const reverted = revertRummyTurn(subbed, 'p_1');
-      expect(reverted.rummyTransaction).toBeNull();
-      expect(reverted.players[0].hand.some((c) => c.id === 'g4')).toBe(true);
-
-      // Lay Off r8 onto a run!
-      const layOffState = layOffCardToMeld(
-        {
-          ...state,
-          currentPlayerIndex: 0,
-          rummyMelds: [{ id: 'run1', ownerName: 'A', kind: 'run', cards: [r4, r5, r6, r7] }],
-          players: state.players.map((p, i) => (i === 0 ? { ...p, hand: [r8, b4] } : p)),
-        },
-        'p_1',
-        'r8'
-      );
-      expect(layOffState.rummyMelds?.[0].cards).toHaveLength(5);
-
-      // Play Meld with 2 Word Tiles -> triggers Multi-Word Effect Chooser!
-      const multiWord = playRummyMeld(
-        {
-          ...state,
-          currentPlayerIndex: 0,
-          rummyMelds: [],
-          players: state.players.map((p, i) => (i === 0 ? { ...p, hand: [r5, r6, r7, b4] } : p)),
-        },
-        'p_1'
-      );
-      expect(multiWord.phase).toBe('rummy_choose_effect');
-
-      // Empty Pool Tie-Breaker: lowest rack value wins!
-      const emptyPoolEnd = unoRummyUpRuleset.handleDrawOrPass(
-        {
-          ...state,
-          currentPlayerIndex: 0,
-          drawPile: [],
-          players: [
-            { ...state.players[0], hand: [r4] }, // 4 pts (lowest -> WINS!)
-            { ...state.players[1], hand: [w1] }, // 50 pts
-          ],
-        },
-        'p_1'
-      );
-      expect(emptyPoolEnd.phase).toBe('round_over');
-      expect(emptyPoolEnd.roundHistory[0].winnerId).toBe('p_1');
-      expect(calculateRummyRackPoints([r4, r5, w1])).toBe(4 + 20 + 50);
-    });
-
-    it('UNO Hearts redesign enforces 100-card deck, 4x Hazard 5, Balanced Wild Shift (+2/rank 7/void-only), Trick Reverse (lowest wins), Clean Sweep (-3) & Fast Shoot the Moon (35pt limit)', () => {
-      expect(HEARTS_TARGET_LIMIT).toBe(35);
-      const deck = unoHeartsRuleset.createDeck({ targetScore: 35, singleRound: false });
-      expect(deck).toHaveLength(100);
-      expect(deck.filter((c) => c.type === 'hazard5')).toHaveLength(4); // 1 per color!
-      expect(deck.filter((c) => c.type === 'tactical_swap')).toHaveLength(4);
-      expect(deck.filter((c) => c.type === 'wild_shift')).toHaveLength(4);
-
-      expect(getHeartPenaltyPoints({ id: 'r1', color: 'red', type: 'number', value: 5 })).toBe(1);
-      expect(getHeartPenaltyPoints({ id: 'h5', color: 'yellow', type: 'hazard5', value: 11 })).toBe(5);
-      expect(getHeartPenaltyPoints({ id: 'ws', color: 'wild', type: 'wild_shift', value: 7 })).toBe(2);
-      expect(getHeartCardRank({ id: 'ws', color: 'wild', type: 'wild_shift', value: 7 })).toBe(7);
-
-      const base = unoHeartsRuleset.initializeGame(makeDefaultPlayers(['P1', 'P2', 'P3'], 'ai'), 'ai', {
-        targetScore: 35,
-        singleRound: false,
-      });
-
-      // Balanced Wild Shift CANNOT be played when holding lead color!
-      const ws = { id: 'ws1', color: 'wild' as const, type: 'wild_shift' as const, value: 7 };
-      const g6 = { id: 'g6', color: 'green' as const, type: 'number' as const, value: 6 };
-      const g3 = { id: 'g3', color: 'green' as const, type: 'number' as const, value: 3 };
-      const gRev = { id: 'grev', color: 'green' as const, type: 'reverse' as const, value: 10 };
-      const yHaz = { id: 'yhaz', color: 'yellow' as const, type: 'hazard5' as const, value: 11 };
-
-      const wsCheck = {
-        ...base,
-        currentPlayerIndex: 0,
-        heartsLeadColor: 'green' as const,
-        players: base.players.map((p, i) => (i === 0 ? { ...p, hand: [ws, g6] } : p)),
-      };
-      expect(unoHeartsRuleset.validateMove(wsCheck, 'p_1', { cardId: 'ws1' }).valid).toBe(false);
-
-      // UNO Trick Reverse: P1 plays Green 6, P2 plays Green 3, P3 plays Green Reverse -> P2 (LOWEST = 3!) wins trick!
-      const revPrep = {
-        ...base,
-        currentPlayerIndex: 0,
-        players: [
-          { ...base.players[0], hand: [g6, yHaz] },
-          { ...base.players[1], hand: [g3, yHaz] },
-          { ...base.players[2], hand: [gRev, yHaz] },
-        ],
-      };
-      const t1 = unoHeartsRuleset.executeAction(revPrep, 'p_1', { cardId: 'g6' });
-      const t2 = unoHeartsRuleset.executeAction(t1, 'p_2', { cardId: 'g3' });
-      const t3 = unoHeartsRuleset.executeAction(t2, 'p_3', { cardId: 'grev' });
-      expect(t3.currentPlayerIndex).toBe(1); // P2 won the reversed trick with lowest rank 3!
-
-      // Clean Sweep (-3 pts catch-up) when finishing round with 0 penalty!
-      const cleanEnd = unoHeartsRuleset.checkWinCondition({
-        ...base,
-        players: [
-          { ...base.players[0], hand: [], score: 10, heartsPenalty: 0, heartsCollected: [] },
-          { ...base.players[1], hand: [], score: 10, heartsPenalty: 5, heartsCollected: [] },
-          { ...base.players[2], hand: [], score: 10, heartsPenalty: 3, heartsCollected: [] },
-        ],
-      });
-      expect(cleanEnd.players[0].score).toBe(7); // 10 - 3 Clean Sweep!
-
-      // Fast Shoot the Moon: P1 collected all 4 Hazard 5 cards -> P1 gets +0, P2 & P3 get +15!
-      const fourHazards = ['red', 'yellow', 'green', 'blue'].map((col, idx) => ({
-        id: `hz${idx}`,
-        color: col as 'red' | 'yellow' | 'green' | 'blue',
-        type: 'hazard5' as const,
-        value: 11,
-      }));
-      const moonEnd = unoHeartsRuleset.checkWinCondition({
-        ...base,
-        players: base.players.map((p, i) => ({
-          ...p,
-          hand: [],
-          score: 0,
-          heartsPenalty: i === 0 ? 20 : 0,
-          heartsCollected: i === 0 ? fourHazards : [],
-        })),
-      });
-      expect(moonEnd.players[0].score).toBe(0);
-      expect(moonEnd.players[1].score).toBe(15);
-      expect(moonEnd.players[2].score).toBe(15);
-    });
-
+  describe('BAGIAN C: Exact Rules: Party & Liars', () => {
     it('UNO Party! enforces 224-card deck, Speed Play penalty, Wild Pile Up, Drawn Together, Point Taken, Wild +4 Challenge & 1-9/20/50 scoring', () => {
       const partyDeck = unoPartyRuleset.createDeck({ targetScore: 500, singleRound: true });
       expect(partyDeck).toHaveLength(224);
@@ -819,343 +500,6 @@ describe('UNO GAME HUB — Exact Specs for Packs, Tools & Modes', () => {
           { id: 's4', color: 'wild', type: 'drawn_together' },
         ])
       ).toBe(7 + 20 + 50 + 50);
-
-      expect(unoExpressRuleset.createDeck({ targetScore: 200, singleRound: true })).toHaveLength(56);
-    });
-
-    it('UNO Express supports Classic 56 (+1/Wild+2), Express+ 60 (Wild Snatch & Skip All), Stacking, Turbo Match, First-to-3 & Knockout Sprint', () => {
-      const classicDeck = unoExpressRuleset.createDeck({
-        targetScore: 250,
-        singleRound: false,
-        expressDeckMode: 'classic_56',
-      });
-      expect(classicDeck).toHaveLength(56);
-      expect(classicDeck.filter((c) => c.type === 'draw1')).toHaveLength(4);
-      expect(classicDeck.filter((c) => c.type === 'wild_draw2')).toHaveLength(2);
-
-      const plusDeck = unoExpressRuleset.createDeck({
-        targetScore: 250,
-        singleRound: false,
-        expressDeckMode: 'plus_60',
-      });
-      expect(plusDeck).toHaveLength(60);
-      expect(plusDeck.filter((c) => c.type === 'wild_express_swap')).toHaveLength(2);
-      expect(plusDeck.filter((c) => c.type === 'wild_skip_all')).toHaveLength(2);
-
-      // Express Stacking (+1 -> Wild +2 = +3) & Turbo Match (2 same-number different-color cards)
-      const base = unoExpressRuleset.initializeGame(makeDefaultPlayers(['A', 'B', 'C'], 'ai'), 'ai', {
-        targetScore: 100,
-        singleRound: false,
-        expressDeckMode: 'plus_60',
-        expressScoringMode: 'first_to_3',
-        expressStacking: true,
-        expressTurboMatch: true,
-      });
-      expect(base.players[0].hand).toHaveLength(5);
-
-      const d1 = { id: 'ed1', color: 'red' as const, type: 'draw1' as const };
-      const wd2 = { id: 'ewd2', color: 'wild' as const, type: 'wild_draw2' as const };
-      const r6 = { id: 'er6', color: 'red' as const, type: 'number' as const, value: 6 };
-      const b6 = { id: 'eb6', color: 'blue' as const, type: 'number' as const, value: 6 };
-      const stackPrep = {
-        ...base,
-        currentPlayerIndex: 0,
-        activeColor: 'red' as const,
-        players: base.players.map((p, i) =>
-          i === 0 ? { ...p, hand: [d1, r6] } : i === 1 ? { ...p, hand: [wd2, b6] } : p
-        ),
-      };
-      const afterD1 = unoExpressRuleset.executeAction(stackPrep, 'p_1', { cardId: 'ed1' });
-      expect(afterD1.pendingDrawCount).toBe(1);
-      const afterWd2 = unoExpressRuleset.executeAction(afterD1, 'p_2', { cardId: 'ewd2', chosenColor: 'blue' });
-      expect(afterWd2.pendingDrawCount).toBe(3);
-
-      // Turbo Match drops both 6s (red 6 + blue 6) in 1 turn & switches activeColor to blue!
-      const turboPrep = {
-        ...base,
-        currentPlayerIndex: 0,
-        activeColor: 'red' as const,
-        discardPile: [{ id: 'tr1', color: 'red' as const, type: 'number' as const, value: 1 }],
-        players: base.players.map((p, i) => (i === 0 ? { ...p, hand: [r6, b6, d1] } : p)),
-      };
-      const afterTurbo = unoExpressRuleset.executeAction(turboPrep, 'p_1', {
-        cardId: 'er6',
-        extraCardIds: ['eb6'],
-      });
-      expect(afterTurbo.players[0].hand).toHaveLength(1);
-      expect(afterTurbo.activeColor).toBe('blue');
-
-      // Wild Skip All gives actor an immediate extra turn!
-      const wsa = { id: 'wsa1', color: 'wild' as const, type: 'wild_skip_all' as const };
-      const afterWsa = unoExpressRuleset.executeAction(
-        { ...base, currentPlayerIndex: 0, players: base.players.map((p, i) => (i === 0 ? { ...p, hand: [wsa, r6] } : p)) },
-        'p_1',
-        { cardId: 'wsa1', chosenColor: 'green' }
-      );
-      expect(afterWsa.currentPlayerIndex).toBe(0);
-      expect(afterWsa.activeColor).toBe('green');
-
-      // Knockout Sprint eliminates highest remaining hand points!
-      const koWin = unoExpressRuleset.checkWinCondition({
-        ...base,
-        settings: { ...base.settings, expressScoringMode: 'knockout_sprint' },
-        players: [
-          { ...base.players[0], hand: [] },
-          { ...base.players[1], hand: [{ id: 'lo', color: 'red', type: 'number', value: 1 }] },
-          { ...base.players[2], hand: [{ id: 'hi', color: 'wild', type: 'wild' }] }, // 50 pts -> eliminated!
-        ],
-      });
-      expect(koWin.players[2].eliminated).toBe(true);
-      expect(koWin.players[1].eliminated).toBe(false);
-    });
-
-    it('UNO Dare! & Emoji enforces 220-card deck, Wild Emoji Hold (+4 break), Combo Lock (+4), Dare Anti-Stacking, Wild Customizable & 0-9/20/50 scoring', () => {
-      const deck = unoDareEmojiRuleset.createDeck({ targetScore: 500, singleRound: false });
-      expect(deck).toHaveLength(220); // 108 UNO Dare + 112 UNO Emoji!
-      expect(DARE_LISTS_BY_CATEGORY.family).toHaveLength(10);
-      expect(DARE_LISTS_BY_CATEGORY.showoff).toHaveLength(10);
-      expect(DARE_LISTS_BY_CATEGORY.daredevil).toHaveLength(10);
-      expect(DARE_LISTS_BY_CATEGORY.custom).toHaveLength(10);
-
-      const base = unoDareEmojiRuleset.initializeGame(makeDefaultPlayers(['A', 'B', 'C'], 'ai'), 'ai', {
-        targetScore: 250,
-        singleRound: false,
-        dareCategory: 'daredevil',
-      });
-
-      // 1) Wild Emoji stacks 1 number card + activates Emoji Hold on next player!
-      const we = { id: 'we1', color: 'wild' as const, type: 'wild_emoji' as const };
-      const emNum = { id: 'en1', color: 'blue' as const, type: 'number' as const, value: 3, emoji: '😮', emojiLabel: 'Terkejut Lebar' };
-      const keep = { id: 'kp1', color: 'red' as const, type: 'number' as const, value: 1 };
-      const wePrep = {
-        ...base,
-        currentPlayerIndex: 0,
-        activeColor: 'red' as const,
-        players: base.players.map((p, i) => (i === 0 ? { ...p, hand: [we, emNum, keep] } : p)),
-      };
-      const afterWe = unoDareEmojiRuleset.executeAction(wePrep, 'p_1', {
-        cardId: 'we1',
-        secondCardId: 'en1',
-        chosenColor: 'blue',
-      });
-      expect(afterWe.players[0].hand).toHaveLength(1); // Both Wild Emoji & stacked number removed!
-      expect(afterWe.emojiChallenge?.targetId).toBe('p_2');
-      expect(afterWe.emojiChallenge?.emoji).toBe('😮');
-      expect(maintainEmojiExpression(afterWe, 'p_2').emojiChallenge?.maintained).toBe(true);
-
-      // Reporting broken Emoji Hold -> +4 penalty cards!
-      const p2BeforeBreak = afterWe.players[1].hand.length;
-      const broken = breakEmojiHold(afterWe, 'A');
-      expect(broken.players[1].hand.length).toBe(p2BeforeBreak + 4);
-      expect(broken.emojiChallenge).toBeNull();
-
-      // 2) Combo Lock: Player with active Emoji Hold hit by Wild Dare -> penaltyDraw = 4!
-      const wd = { id: 'wd1', color: 'wild' as const, type: 'wild_dare' as const };
-      const comboPrep = {
-        ...afterWe,
-        currentPlayerIndex: 0,
-        players: afterWe.players.map((p, i) => (i === 0 ? { ...p, hand: [wd, keep] } : p)),
-      };
-      const comboPrompt = unoDareEmojiRuleset.executeAction(comboPrep, 'p_1', {
-        cardId: 'wd1',
-        chosenColor: 'green',
-        pileIndex: 5,
-      });
-      expect(comboPrompt.darePrompt?.comboLock).toBe(true);
-      expect(comboPrompt.darePrompt?.penaltyDraw).toBe(4);
-      const comboFailed = unoDareEmojiRuleset.resolvePrompt(comboPrompt, { challengeChoice: 'skip_dare' });
-      expect(comboFailed.players[1].hand.length).toBe(afterWe.players[1].hand.length + 4);
-
-      // 3) Anti-Stacking for Dare: Draw 2 stacks, Dare & Wild Dare CANNOT stack!
-      const d2 = { id: 'd2x', color: 'red' as const, type: 'draw2' as const };
-      const dareC = { id: 'dc1', color: 'red' as const, type: 'dare_card' as const, dareNumber: 2 };
-      const stackState = {
-        ...base,
-        currentPlayerIndex: 0,
-        activeColor: 'red' as const,
-        pendingDrawCount: 2,
-        players: base.players.map((p, i) => (i === 0 ? { ...p, hand: [d2, dareC, wd] } : p)),
-      };
-      expect(unoDareEmojiRuleset.validateMove(stackState, 'p_1', { cardId: 'd2x' }).valid).toBe(true);
-      expect(unoDareEmojiRuleset.validateMove(stackState, 'p_1', { cardId: 'dc1' }).valid).toBe(false);
-      expect(unoDareEmojiRuleset.validateMove(stackState, 'p_1', { cardId: 'wd1' }).valid).toBe(false);
-
-      // 4) Wild Customizable saves custom rule + changes color
-      const wc = { id: 'wc1', color: 'wild' as const, type: 'wild_customizable' as const };
-      const wcPrompt = unoDareEmojiRuleset.executeAction(
-        { ...base, currentPlayerIndex: 0, players: base.players.map((p, i) => (i === 0 ? { ...p, hand: [wc, keep] } : p)) },
-        'p_1',
-        { cardId: 'wc1' }
-      );
-      expect(wcPrompt.phase).toBe('wild_custom_rule');
-      const afterWc = unoDareEmojiRuleset.resolvePrompt(wcPrompt, {
-        color: 'yellow',
-        textValue: 'Bilang MERAH MENYALA!',
-      });
-      expect(afterWc.activeColor).toBe('yellow');
-      expect(afterWc.activeHouseRules).toContain('Bilang MERAH MENYALA!');
-
-      // 5) Scoring: Numbers = face, Draw2/Skip/Reverse/Dare = 20, Wild/Wild+4/WildDare/WildEmoji/WildCustom = 50
-      expect(
-        calculateDareEmojiHandPoints([
-          { id: 's1', color: 'red', type: 'number', value: 7 },
-          { id: 's2', color: 'blue', type: 'dare_card', dareNumber: 1 },
-          { id: 's3', color: 'wild', type: 'wild_dare' },
-          { id: 's4', color: 'wild', type: 'wild_emoji' },
-          { id: 's5', color: 'wild', type: 'wild_customizable' },
-        ])
-      ).toBe(7 + 20 + 50 + 50 + 50);
-    });
-
-    it('UNO House Rules & Remix enforces 5-slot Add-a-Rule + QTE, Wild Game Changer, Wild +4 Challenge, Stacking/Reverse-on-Draw/Multi-Card/Jump-In & Strategic AI', () => {
-      const deck = unoHouseRemixRuleset.createDeck({ targetScore: 500, singleRound: false });
-      expect(deck).toHaveLength(112);
-      expect(deck.some((c) => c.hasRuleBubble)).toBe(true);
-
-      const base = unoHouseRemixRuleset.initializeGame(makeDefaultPlayers(['A', 'B', 'C'], 'ai'), 'ai', {
-        targetScore: 500,
-        singleRound: false,
-        houseRemixConfig: {
-          stackingMode: 'mixed',
-          reverseOnDraw: true,
-          zeroHandSwapMode: 'pass_left',
-          multiCardPlay: true,
-          speedJumpIn: true,
-          maxHouseRules: MAX_HOUSE_RULES,
-        },
-      });
-
-      // 1) First time playing bubble number 5 -> Add-a-Rule prompt -> creates Slot 1/5
-      const r5a = { id: 'r5a', color: 'red' as const, type: 'number' as const, value: 5, hasRuleBubble: true };
-      const r5b = { id: 'r5b', color: 'red' as const, type: 'number' as const, value: 5, hasRuleBubble: true };
-      const r2 = { id: 'r2', color: 'red' as const, type: 'number' as const, value: 2 };
-      const prep = {
-        ...base,
-        currentPlayerIndex: 0,
-        activeColor: 'red' as const,
-        discardPile: [r2],
-        players: base.players.map((p, i) => (i === 0 ? { ...p, hand: [r5a, r5b, r2] } : p)),
-      };
-      const prompted = unoHouseRemixRuleset.executeAction(prep, 'p_1', { cardId: 'r5a' });
-      expect(prompted.phase).toBe('add_rule_prompt');
-      const withRule = unoHouseRemixRuleset.resolvePrompt(prompted, { textValue: 'Tepuk Tangan!' });
-      expect(withRule.houseRuleSlots).toHaveLength(1);
-      expect(withRule.houseRuleSlots?.[0].triggerNumber).toBe(5);
-
-      // 2) Second time playing bubble number 5 -> triggers QTE; slowest player gets +1 penalty!
-      const qteStarted = unoHouseRemixRuleset.executeAction(
-        { ...withRule, currentPlayerIndex: 0, activeColor: 'red' },
-        'p_1',
-        { cardId: 'r5b' }
-      );
-      expect(qteStarted.phase).toBe('house_rule_qte');
-      const p3Before = qteStarted.players[2].hand.length;
-      const qte1 = completeRuleQTE(qteStarted, 'p_1');
-      const qteDone = completeRuleQTE(qte1, 'p_2'); // P3 is slowest -> +1 penalty!
-      expect(qteDone.phase).toBe('playing');
-      expect(qteDone.players[2].hand.length).toBe(p3Before + 1);
-
-      // 3) Wild Game Changer replaces active rule slot & changes color
-      const wgc = { id: 'wgc1', color: 'wild' as const, type: 'wild_game_changer' as const };
-      const wgcPrompt = unoHouseRemixRuleset.executeAction(
-        { ...qteDone, currentPlayerIndex: 0, players: qteDone.players.map((p, i) => (i === 0 ? { ...p, hand: [wgc, r2] } : p)) },
-        'p_1',
-        { cardId: 'wgc1' }
-      );
-      expect(wgcPrompt.phase).toBe('house_game_changer');
-      const afterWgc = unoHouseRemixRuleset.resolvePrompt(wgcPrompt, {
-        passCardId: '0',
-        color: 'blue',
-        textValue: 'Sentuh Hidung!',
-      });
-      expect(afterWgc.activeColor).toBe('blue');
-      expect(afterWgc.houseRuleSlots?.[0].title).toBe('Sentuh Hidung!');
-
-      // 4) Stacking Draw + Reverse-on-Draw (and Jump-In blocked during pendingDrawCount > 0!)
-      const d2a = { id: 'd2a', color: 'blue' as const, type: 'draw2' as const };
-      const revB = { id: 'revb', color: 'blue' as const, type: 'reverse' as const };
-      const stackPrep = {
-        ...afterWgc,
-        currentPlayerIndex: 0,
-        activeColor: 'blue' as const,
-        players: afterWgc.players.map((p, i) =>
-          i === 0 ? { ...p, hand: [d2a, r2] } : i === 1 ? { ...p, hand: [revB, r2] } : p
-        ),
-      };
-      const stacked = unoHouseRemixRuleset.executeAction(stackPrep, 'p_1', { cardId: 'd2a' });
-      expect(stacked.pendingDrawCount).toBe(2);
-      // Jump-In MUST be blocked while pendingDrawCount > 0!
-      expect(attemptHouseRemixJumpIn(stacked, 'p_3', stacked.players[2].hand[0].id).pendingDrawCount).toBe(2);
-      // Reverse-on-Draw bounces +2 back!
-      const bounced = unoHouseRemixRuleset.executeAction(stacked, 'p_2', { cardId: 'revb' });
-      expect(bounced.direction).toBe(-1);
-      expect(bounced.pendingDrawCount).toBe(2);
-
-      // 5) Multi-Card Play + Wild +4 Challenge (+6 wrong challenger)
-      const b4a = { id: 'b4a', color: 'blue' as const, type: 'number' as const, value: 4 };
-      const b4b = { id: 'b4b', color: 'blue' as const, type: 'number' as const, value: 4 };
-      const multiPrep = {
-        ...base,
-        currentPlayerIndex: 0,
-        activeColor: 'blue' as const,
-        discardPile: [{ id: 'tb1', color: 'blue' as const, type: 'number' as const, value: 1 }],
-        players: base.players.map((p, i) => (i === 0 ? { ...p, hand: [b4a, b4b, r2] } : p)),
-      };
-      const afterMulti = unoHouseRemixRuleset.executeAction(multiPrep, 'p_1', {
-        cardId: 'b4a',
-        extraCardIds: ['b4b'],
-      });
-      expect(afterMulti.players[0].hand).toHaveLength(1); // Both blue 4s played in 1 turn!
-
-      // Wild +4 Challenge (legal -> challenger +6 & skipped)
-      const w4 = { id: 'hw4', color: 'wild' as const, type: 'wild_draw4' as const };
-      const chPrep = {
-        ...base,
-        currentPlayerIndex: 0,
-        activeColor: 'blue' as const,
-        players: base.players.map((p, i) => (i === 0 ? { ...p, hand: [w4, r2] } : p)),
-      };
-      const chPrompt = unoHouseRemixRuleset.executeAction(chPrep, 'p_1', { cardId: 'hw4', chosenColor: 'green' });
-      expect(chPrompt.phase).toBe('house_wild4_challenge');
-      const p2BeforeCh = chPrompt.players[1].hand.length;
-      const chFailed = unoHouseRemixRuleset.resolvePrompt(chPrompt, { challengeChoice: 'challenge' });
-      expect(chFailed.players[1].hand.length).toBe(p2BeforeCh + 6);
-      expect(chFailed.currentPlayerIndex).toBe(2);
-
-      // 6) Strategic AI saves Wild card early & attacks leader (<=2 cards) with Action card!
-      const aiState = {
-        ...base,
-        currentPlayerIndex: 0,
-        activeColor: 'red' as const,
-        players: [
-          {
-            ...base.players[0],
-            isAI: true,
-            hand: [
-              { id: 'ai_w', color: 'wild' as const, type: 'wild' as const },
-              { id: 'ai_r2', color: 'red' as const, type: 'number' as const, value: 2 },
-              { id: 'ai_d2', color: 'red' as const, type: 'draw2' as const },
-              { id: 'ai_b8', color: 'blue' as const, type: 'number' as const, value: 8 },
-            ],
-          },
-          { ...base.players[1], hand: [r2] }, // Leader with 1 card!
-          base.players[2],
-        ],
-      };
-      const aiMove = unoHouseRemixRuleset.decideAIMove(aiState);
-      expect(aiMove.type).toBe('play');
-      if (aiMove.type === 'play') {
-        expect(aiMove.move.cardId).toBe('ai_d2'); // Aggression on leader + saves Wild!
-      }
-
-      // 7) Scoring (0-9 = face, Actions = 20, Wilds = 50)
-      expect(
-        calculateHouseRemixHandPoints([
-          { id: 'p1', color: 'red', type: 'number', value: 8 },
-          { id: 'p2', color: 'blue', type: 'reverse' },
-          { id: 'p3', color: 'wild', type: 'wild_game_changer' },
-        ])
-      ).toBe(8 + 20 + 50);
     });
 
     it("Liar's UNO enforces 112-card deck, Regular vs Liar's, Last-Card Bluff Fail, 0's Pass post-swap penalty, Wild Liar's Challenge & Co-Winners", () => {
