@@ -47,6 +47,7 @@ export interface HubRoomActionResponse {
   error?: string;
   room?: HubOnlineRoomInfo;
   playerId?: string;
+  role?: 'player' | 'spectator';
   gameState?: HubGameState | null;
 }
 
@@ -124,6 +125,13 @@ export function toggleHubReady(ready?: boolean): void {
   getHubSocket().emit('hub:toggle_ready', typeof ready === 'boolean' ? { ready } : undefined);
 }
 
+export function toggleHubSpectatorQueue(queued?: boolean): void {
+  getHubSocket().emit(
+    'hub:toggle_spectator_queue',
+    typeof queued === 'boolean' ? { queued } : undefined
+  );
+}
+
 export function updateHubRoomSettings(payload: {
   variantId?: Exclude<VariantId, 'uno-zero'>;
   settings?: Partial<VariantSettings>;
@@ -145,6 +153,26 @@ export function startHubOnlineGame(): Promise<{ ok: boolean; error?: string }> {
       resolve(res ?? { ok: true });
     });
   });
+}
+
+export interface HubEmoteEvent {
+  id: string;
+  playerId: string;
+  playerName: string;
+  emoteId: string;
+  label: string;
+}
+
+export function sendHubEmote(emoteId: string, label: string): void {
+  getHubSocket().emit('hub:send_emote', { emoteId, label });
+}
+
+export function subscribeHubEmotes(onEmote: (evt: HubEmoteEvent) => void): () => void {
+  const sock = getHubSocket();
+  sock.on('hub:emote', onEmote);
+  return () => {
+    sock.off('hub:emote', onEmote);
+  };
 }
 
 export function sendHubOnlineAction(action: HubOnlineAction): void {

@@ -20,6 +20,7 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react';
+import { ActiveRulesBadges } from '../components/ActiveRulesBadges';
 import {
   buildHubInviteLink,
   loadGuestNickname,
@@ -224,12 +225,12 @@ export const HubOnlineLobbyPage: React.FC<HubOnlineLobbyPageProps> = ({
               <button
                 type="button"
                 onClick={handleCopyInviteLink}
-                className="w-full py-3 px-4 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-display font-black text-sm flex items-center justify-center gap-2 shadow-lg cursor-pointer transition active:scale-[0.98]"
+                className="w-full min-h-11 py-3 px-4 rounded-xl bg-sky-400 hover:bg-sky-300 text-slate-950 font-display font-black text-sm flex items-center justify-center gap-2 transition active:scale-[0.98]"
               >
                 {copiedLink ? (
                   <>
                     <Check className="w-4 h-4" />
-                    LINK UNDANGAN DISALIN!
+                    LINK UNDANGAN DISALIN
                   </>
                 ) : (
                   <>
@@ -239,6 +240,17 @@ export const HubOnlineLobbyPage: React.FC<HubOnlineLobbyPageProps> = ({
                 )}
               </button>
               <p className="text-[11px] text-slate-400 break-all font-mono">{inviteUrl}</p>
+            </div>
+            <div className="pt-2 border-t border-slate-800/80 flex flex-col items-center gap-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                Aturan Aktif di Room Ini
+              </span>
+              <ActiveRulesBadges
+                variantId={room.variantId}
+                settings={room.settings}
+                playerCount={room.targetPlayerCount}
+                compact
+              />
             </div>
           </div>
 

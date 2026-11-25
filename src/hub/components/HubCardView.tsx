@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowLeftRight,
@@ -14,6 +14,7 @@ import { getFlexColorNotches } from '../rulesets/unoFlex';
 import { getLiarsColorSymbol } from '../rulesets/unoLiars';
 import { getModeTheme } from '../themes/modeThemes';
 import { HubCard, HubCardColor, VariantId } from '../types';
+import { ColorblindSymbol, useColorblindMode } from '../utils/colorblind';
 
 interface HubCardViewProps {
   card?: HubCard;
@@ -24,7 +25,9 @@ interface HubCardViewProps {
   playable?: boolean;
   dimmed?: boolean;
   selected?: boolean;
+  armed?: boolean;
   onClick?: () => void;
+  onSwipeUp?: () => void;
   className?: string;
 }
 
@@ -219,9 +222,15 @@ export const HubCardView: React.FC<HubCardViewProps> = ({
   playable = false,
   dimmed = false,
   selected = false,
+  armed = false,
   onClick,
+  onSwipeUp,
   className = '',
 }) => {
+  const [colorblindMode] = useColorblindMode();
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const swipedUpRef = useRef(false);
+
   if (faceDown || !card) {
     const theme = getModeTheme(variantId, flipSide);
     return (
@@ -264,23 +273,58 @@ export const HubCardView: React.FC<HubCardViewProps> = ({
   const isWild = color === 'wild' || type.startsWith('wild');
   const interactive = Boolean(onClick && playable);
 
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (!interactive || !onSwipeUp || e.touches.length !== 1) return;
+    swipedUpRef.current = false;
+    touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!interactive || !onSwipeUp || !touchStartRef.current || e.changedTouches.length === 0) return;
+    const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
+    const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
+    touchStartRef.current = null;
+    if (dy < -36 && Math.abs(dx) < 56) {
+      swipedUpRef.current = true;
+      onSwipeUp();
+    }
+  };
+
+  const handleClick = () => {
+    if (!interactive) return;
+    if (swipedUpRef.current) {
+      swipedUpRef.current = false;
+      return;
+    }
+    onClick?.();
+  };
+
   return (
     <motion.button
       type="button"
-      onClick={interactive ? onClick : undefined}
+      onClick={handleClick}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
       disabled={!interactive}
-      whileHover={interactive ? { y: -8, scale: 1.05 } : undefined}
-      whileTap={interactive ? { scale: 0.95 } : undefined}
+      whileHover={interactive ? { y: armed ? -16 : -10, scale: 1.05 } : undefined}
+      whileTap={interactive ? { scale: 0.96 } : undefined}
       className={`relative select-none ${SIZE_MAP[size]} ${
         flipSide === 'dark' ? 'bg-slate-900' : 'bg-white'
-      } shadow-xl transition-all duration-150 ${
+      } shadow-xl transition-[transform,opacity] duration-150 will-change-transform ${
         interactive
-          ? 'cursor-pointer ring-3 ring-amber-300 hover:ring-white shadow-amber-400/30'
+          ? armed
+            ? 'cursor-pointer -translate-y-4 scale-[1.04] ring-4 ring-emerald-400 shadow-2xl shadow-emerald-400/35 z-20'
+            : 'cursor-pointer -translate-y-2 ring-3 ring-amber-300 hover:ring-white shadow-lg shadow-amber-400/25'
           : 'cursor-default'
-      } ${selected ? 'ring-4 ring-emerald-400 -translate-y-2' : ''} ${
-        dimmed ? 'opacity-45 saturate-50 brightness-90' : ''
+      } ${selected && !armed ? 'ring-4 ring-emerald-400 -translate-y-3' : ''} ${
+        dimmed ? 'opacity-40 saturate-50 brightness-75' : ''
       } ${className}`}
     >
+      {armed && (
+        <span className="pointer-events-none absolute -top-6 left-1/2 -translate-x-1/2 z-30 whitespace-nowrap px-2 py-0.5 rounded-md bg-emerald-400 text-slate-950 font-display font-black text-[10px] shadow">
+          Tap / Geser ↑
+        </span>
+      )}
       <div
         className={`relative w-full h-full rounded-[inherit] overflow-hidden flex items-center justify-center ${COLOR_GRADIENTS[color]}`}
       >
@@ -315,6 +359,15 @@ export const HubCardView: React.FC<HubCardViewProps> = ({
         >
           {corner}
         </div>
+
+        {colorblindMode && size !== 'xs' && (
+          <div
+            className="pointer-events-none absolute bottom-1 left-1.5 z-10 p-0.5 rounded bg-slate-950/75 text-white shadow"
+            aria-hidden="true"
+          >
+            <ColorblindSymbol color={color} size={size === 'sm' ? 9 : 11} />
+          </div>
+        )}
 
         {/* Flex secondary color diagonal corner wedge (distinct 2-color UNO Flex visual) */}
         {card.flexColor && (

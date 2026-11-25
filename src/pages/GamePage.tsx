@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { getModeTheme } from '../hub/themes/modeThemes';
+import { ConnectionStatusBanner } from '../hub/components/ConnectionStatusBanner';
 import { GameMode, GameState, OnlinePlayerNotice, SlotPosition } from '../types/game';
 import { canTakeFromDiscardPile, countFaceDownCards, isActionCard } from '../engine/rules';
 import { soundFX } from '../services/sound';
@@ -230,6 +231,7 @@ export const GamePage: React.FC<GamePageProps> = ({
   return (
     <div className={`min-h-screen ${modeTheme.tableClass} flex flex-col justify-between text-slate-100 relative overflow-x-hidden`}>
       <ActionOverlayBanner event={state.lastEvent} />
+      {mode === 'online' && <ConnectionStatusBanner status={connectionStatus} />}
 
       <header className={`relative z-20 px-3 sm:px-6 py-2.5 ${modeTheme.headerBgClass} border-b ${modeTheme.headerBorderClass} flex items-center justify-between gap-2`}>
         <div className="flex items-center gap-2 min-w-0">
@@ -509,7 +511,7 @@ export const GamePage: React.FC<GamePageProps> = ({
 
       <section
         aria-label="Grid kartu pemain"
-        className={`w-full bg-slate-950/95 border-t px-2.5 sm:px-5 pt-2.5 pb-4 z-20 transition ${
+        className={`w-full bg-slate-950/95 border-t px-2.5 sm:px-5 pt-2.5 pb-safe z-20 transition ${
           isMyTurn ? 'border-amber-400/50' : 'border-slate-800'
         }`}
       >

@@ -8,8 +8,13 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:client": "vite",
     "dev:server": "tsx server/index.ts",
+    "typecheck:client": "tsc -p tsconfig.app.json --noEmit",
+    "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
+    "typecheck": "npm run typecheck:client && npm run typecheck:server",
     "build": "tsc -b && vite build",
+    "build:client": "tsc -p tsconfig.app.json --noEmit && vite build",
     "start": "tsx server/index.ts",
     "preview": "vite preview",
     "test": "vitest run",

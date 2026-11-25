@@ -27,6 +27,7 @@ import {
   startHubOnlineGame,
   subscribeHubOnlineEvents,
   toggleHubReady,
+  toggleHubSpectatorQueue,
   updateHubRoomSettings,
 } from './services/hubOnlineClient';
 import {
@@ -418,12 +419,20 @@ export function UnoGameHubApp() {
     const isOnlineHost = Boolean(
       activeState.mode !== 'online' || (hubRoom && hubPlayerId && hubRoom.hostId === hubPlayerId)
     );
+    const mySpectator =
+      activeState.mode === 'online' && hubRoom && hubPlayerId
+        ? hubRoom.spectators?.find((s) => s.id === hubPlayerId) ?? null
+        : null;
     return (
       <HubGamePage
         state={activeState}
         onlineRoomCode={hubRoom?.code ?? null}
         viewerPlayerId={activeState.mode === 'online' ? hubPlayerId : null}
         isOnlineHost={isOnlineHost}
+        isSpectator={Boolean(mySpectator)}
+        spectatorCount={hubRoom?.spectators?.length ?? 0}
+        spectatorQueued={Boolean(mySpectator?.queuedForNextRound)}
+        onToggleSpectatorQueue={() => toggleHubSpectatorQueue()}
         connectionStatus={hubConnStatus}
         onlineNotice={hubNotice}
         onUpdateState={handleUpdateState}
@@ -452,9 +461,20 @@ export function UnoGameHubApp() {
     );
   }
 
+  const handleQuickPlayBot = () => {
+    const classicMeta = getVariantMetadata('uno-classic');
+    void handleStartVariantGame(
+      'uno-classic',
+      'ai',
+      ['Kamu', 'Bot 1', 'Bot 2', 'Bot 3'],
+      { ...classicMeta.defaultSettings, singleRound: true, winConditionMode: 'quick_single' }
+    );
+  };
+
   return (
     <HubHomePage
       onSelectVariant={handleSelectVariant}
+      onQuickPlayBot={handleQuickPlayBot}
       onOpenGuide={handleOpenGuide}
       onOpenSettings={() => setScreen('settings')}
     />

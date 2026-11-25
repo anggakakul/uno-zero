@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Ban, RefreshCw } from 'lucide-react';
 import { Card, CardColor } from '../types/game';
+import { ColorblindSymbol, useColorblindMode } from '../hub/utils/colorblind';
 
 interface UnoCardProps {
   card?: Card;
@@ -92,6 +93,7 @@ export const UnoCard: React.FC<UnoCardProps> = ({
   onClick,
   className = '',
 }) => {
+  const [colorblindMode] = useColorblindMode();
   const interactive = Boolean(onClick && (playable || faceDown));
 
   if (faceDown || !card) {
@@ -201,6 +203,15 @@ export const UnoCard: React.FC<UnoCardProps> = ({
         >
           {cornerText}
         </div>
+
+        {colorblindMode && size !== 'xs' && (
+          <div
+            className="pointer-events-none absolute top-1 right-1.5 z-10 p-0.5 rounded bg-slate-950/65 text-white shadow"
+            aria-hidden="true"
+          >
+            <ColorblindSymbol color={card.color} size={size === 'sm' ? 9 : 11} />
+          </div>
+        )}
 
         {/* Center symbol */}
         <div className="relative z-10 flex flex-col items-center justify-center">

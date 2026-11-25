@@ -293,6 +293,10 @@ export interface VariantSettings {
   /** Card limit for optional Mercy Rule (default: 25) */
   mercyCardLimit?: number;
   strictWildDraw4?: boolean;
+  /** Optional Lobby House Rules: 7-0 Swap/Pass, Draw Stacking (+2/+4), and Jump-In */
+  houseRuleSevenZero?: boolean;
+  houseRuleStacking?: boolean;
+  houseRuleJumpIn?: boolean;
   /** Enabled Add-On Expansion Packs */
   activePacks?: AddOnPackId[];
   /** UNO Flip alternative scoring option */
@@ -409,6 +413,13 @@ export interface HubOnlineLobbyPlayer {
   teamId?: number;
 }
 
+export interface HubOnlineSpectator {
+  id: string;
+  name: string;
+  connected: boolean;
+  queuedForNextRound: boolean;
+}
+
 export interface HubOnlineRoomInfo {
   code: string;
   hostId: string;
@@ -418,6 +429,7 @@ export interface HubOnlineRoomInfo {
   targetPlayerCount: number;
   started: boolean;
   players: HubOnlineLobbyPlayer[];
+  spectators?: HubOnlineSpectator[];
 }
 
 export interface HubResolvePromptPayload {

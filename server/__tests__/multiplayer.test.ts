@@ -432,4 +432,72 @@ describe('UNO ZERO & All 10 Hub Modes — Real-Time Online Multiplayer Integrati
     host.disconnect();
     guest.disconnect();
   });
+
+  it('Spectator Mode & 1-Click Rematch: late joiner spectates with hidden hands, queues up, and joins rematch automatically', async () => {
+    const host = await connectClient();
+    const guest = await connectClient();
+    const spectator = await connectClient();
+
+    const created = await emitAck<{ ok: boolean; room?: HubOnlineRoomInfo }>(
+      host,
+      'hub:create_room',
+      {
+        playerName: 'SpecHost',
+        sessionId: 'spec-host',
+        variantId: 'uno-classic',
+        settings: { targetScore: 500, singleRound: true },
+      }
+    );
+    const code = created.room!.code;
+    await emitAck(guest, 'hub:join_room', { code, playerName: 'SpecGuest', sessionId: 'spec-guest' });
+
+    const readyP = waitForEvent<HubOnlineRoomInfo>(host, 'hub:room_updated');
+    guest.emit('hub:toggle_ready', { ready: true });
+    await readyP;
+
+    const startP = waitForEvent<HubGameState>(host, 'hub:game_state');
+    await emitAck(host, 'hub:start_game');
+    await startP;
+
+    // 3rd user joins mid-game -> admitted as spectator with sanitized hands (zero leaks)
+    const specJoin = await emitAck<{
+      ok: boolean;
+      role?: string;
+      room?: HubOnlineRoomInfo;
+      gameState?: HubGameState | null;
+    }>(spectator, 'hub:join_room', {
+      code,
+      playerName: 'Penonton1',
+      sessionId: 'spec-viewer',
+    });
+
+    expect(specJoin.ok).toBe(true);
+    expect(specJoin.role).toBe('spectator');
+    expect(specJoin.room?.spectators?.length).toBe(1);
+    expect(specJoin.gameState).toBeTruthy();
+
+    // Verify ALL players' cards are hidden for the spectator (only hand count preserved)
+    for (const p of specJoin.gameState!.players) {
+      expect(p.hand.length).toBeGreaterThan(0);
+      for (const c of p.hand) {
+        expect(c.id.startsWith('hidden_')).toBe(true);
+      }
+    }
+
+    // Spectator cannot dispatch gameplay actions
+    const blockedAction = await emitAck<{ ok: boolean }>(spectator, 'hub:game_action', {
+      action: { type: 'draw_or_pass' },
+    });
+    expect(blockedAction.ok).toBe(false);
+
+    // Spectator queues for next round
+    const queuedRoomP = waitForEvent<HubOnlineRoomInfo>(host, 'hub:room_updated');
+    spectator.emit('hub:toggle_spectator_queue', { queued: true });
+    const queuedRoom = await queuedRoomP;
+    expect(queuedRoom.spectators?.[0]?.queuedForNextRound).toBe(true);
+
+    host.disconnect();
+    guest.disconnect();
+    spectator.disconnect();
+  });
 });

@@ -43,6 +43,11 @@ class SoundManager {
     return this.muted;
   }
 
+  /** Pre-warms the Web Audio context on first user gesture so SFX plays with zero latency */
+  public warmup(): void {
+    this.getContext();
+  }
+
   /** Soft card friction swoosh + subtle snap for draw / swap / flip */
   public playCardSlide(): void {
     const ctx = this.getContext();

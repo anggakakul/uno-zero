@@ -18,6 +18,7 @@ import {
 import { OnlinePlayerNotice } from '../src/types/game';
 
 const HUB_TURN_TIMEOUT_MS = 30_000;
+const HUB_DISCONNECT_GRACE_MS = 30_000;
 const HUB_AI_STEP_MS = 750;
 const HUB_ROOM_INACTIVE_TTL_MS = 30 * 60 * 1000;
 const HUB_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -34,6 +35,15 @@ interface HubServerPlayer {
   ready: boolean;
 }
 
+interface HubServerSpectator {
+  id: string;
+  sessionId: string;
+  socketId: string;
+  name: string;
+  connected: boolean;
+  queuedForNextRound: boolean;
+}
+
 interface HubOnlineRoom {
   code: string;
   hostId: string;
@@ -43,6 +53,7 @@ interface HubOnlineRoom {
   targetPlayerCount: number;
   started: boolean;
   players: HubServerPlayer[];
+  spectators: HubServerSpectator[];
   state: HubGameState | null;
   turnTimer: ReturnType<typeof setTimeout> | null;
   aiTimer: ReturnType<typeof setTimeout> | null;
@@ -139,6 +150,12 @@ export function createHubRoomManager(io: Server): HubRoomManager {
         ready: p.ready,
         teamId: meta.isTeamGame ? idx % (totalExpected === 6 ? 3 : 2) : undefined,
       })),
+      spectators: room.spectators.map((s) => ({
+        id: s.id,
+        name: s.name,
+        connected: s.connected,
+        queuedForNextRound: s.queuedForNextRound,
+      })),
     };
   }
 
@@ -192,13 +209,24 @@ export function createHubRoomManager(io: Server): HubRoomManager {
       return;
     }
 
-    // 2. General Human Turn / Prompt Timeout (30s, or 8s if active player is disconnected)
+    // 2. Human Turn / Prompt Timeout (30s normal, or 30s reconnect grace period before Bot AI takes over)
     if (resetTurnTimer || !room.turnTimer) {
       if (room.turnTimer) clearTimeout(room.turnTimer);
       const actorForTimer = promptActor ?? activePlayer;
       const isDisconnected = actorForTimer && actorForTimer.connected === false;
-      const timeoutMs = isDisconnected ? 8_000 : HUB_TURN_TIMEOUT_MS;
+      const timeoutMs = isDisconnected ? HUB_DISCONNECT_GRACE_MS : HUB_TURN_TIMEOUT_MS;
       state.turnDeadline = Date.now() + timeoutMs;
+
+      if (isDisconnected && actorForTimer) {
+        emitNotice(
+          room,
+          makeNotice(
+            'disconnected',
+            actorForTimer.name,
+            `${actorForTimer.name} terputus. Grace period 30 detik sebelum Bot AI mengambil alih giliran.`
+          )
+        );
+      }
 
       room.turnTimer = setTimeout(() => {
         if (!room.state) return;
@@ -226,6 +254,16 @@ export function createHubRoomManager(io: Server): HubRoomManager {
       if (sock) {
         const sanitized = sanitizeHubGameStateForPlayer(room.state, player.id);
         sock.emit('hub:game_state', sanitized);
+      }
+    }
+
+    if (room.spectators.length > 0) {
+      const spectatorState = sanitizeHubGameStateForPlayer(room.state, '__spectator__');
+      for (const spec of room.spectators) {
+        const sock = io.sockets.sockets.get(spec.socketId);
+        if (sock) {
+          sock.emit('hub:game_state', spectatorState);
+        }
       }
     }
   }
@@ -267,6 +305,13 @@ export function createHubRoomManager(io: Server): HubRoomManager {
 
     const room = hubRooms.get(link.code);
     if (!room) return;
+
+    const departingSpec = room.spectators.find((s) => s.id === link.playerId);
+    if (departingSpec) {
+      room.spectators = room.spectators.filter((s) => s.id !== link.playerId);
+      broadcastRoomInfo(room);
+      return;
+    }
 
     const departing = room.players.find((p) => p.id === link.playerId);
     if (!departing) return;
@@ -420,6 +465,7 @@ export function createHubRoomManager(io: Server): HubRoomManager {
             targetPlayerCount: defaultTarget,
             started: false,
             players: [host],
+            spectators: [],
             state: null,
             turnTimer: null,
             aiTimer: null,
@@ -444,6 +490,7 @@ export function createHubRoomManager(io: Server): HubRoomManager {
             error?: string;
             room?: HubOnlineRoomInfo;
             playerId?: string;
+            role?: 'player' | 'spectator';
             gameState?: HubGameState | null;
           }) => void
         ) => {
@@ -495,16 +542,49 @@ export function createHubRoomManager(io: Server): HubRoomManager {
             return;
           }
 
-          if (room.started) {
-            cb?.({ ok: false, error: 'Permainan di room ini sudah dimulai.' });
-            return;
-          }
-
           const meta = getVariantMetadata(room.variantId);
-          if (room.players.length >= meta.maxPlayers) {
+          const mustSpectate = room.started || room.players.length >= meta.maxPlayers;
+
+          if (mustSpectate) {
+            if (socketToHubRoom.has(socket.id)) {
+              handleHubDisconnect(socket, true);
+            }
+            const existingSpec = room.spectators.find((s) => s.sessionId === sessionId);
+            const spec: HubServerSpectator = existingSpec
+              ? Object.assign(existingSpec, {
+                  socketId: socket.id,
+                  connected: true,
+                  name: payload.playerName?.trim().slice(0, 20) || existingSpec.name,
+                })
+              : {
+                  id: sessionId,
+                  sessionId,
+                  socketId: socket.id,
+                  name:
+                    payload.playerName?.trim().slice(0, 20) ||
+                    `Penonton ${room.spectators.length + 1}`,
+                  connected: true,
+                  queuedForNextRound: false,
+                };
+            if (!existingSpec) {
+              room.spectators.push(spec);
+            }
+            touchRoom(room);
+            socketToHubRoom.set(socket.id, { code, playerId: spec.id });
+            socket.join(`hub:${code}`);
+            emitNotice(
+              room,
+              makeNotice('joined', spec.name, `${spec.name} masuk sebagai penonton.`)
+            );
+            broadcastRoomInfo(room);
             cb?.({
-              ok: false,
-              error: `Room sudah penuh (maksimal ${meta.maxPlayers} pemain untuk ${meta.name}).`,
+              ok: true,
+              room: getRoomInfo(room),
+              playerId: spec.id,
+              role: 'spectator',
+              gameState: room.state
+                ? sanitizeHubGameStateForPlayer(room.state, '__spectator__')
+                : null,
             });
             return;
           }
@@ -545,6 +625,7 @@ export function createHubRoomManager(io: Server): HubRoomManager {
             ok: boolean;
             room?: HubOnlineRoomInfo;
             playerId?: string;
+            role?: 'player' | 'spectator';
             gameState?: HubGameState | null;
           }) => void
         ) => {
@@ -556,7 +637,26 @@ export function createHubRoomManager(io: Server): HubRoomManager {
           }
           const existing = room.players.find((p) => p.sessionId === payload.sessionId);
           if (!existing) {
-            cb?.({ ok: false });
+            const existingSpec = room.spectators.find((s) => s.sessionId === payload.sessionId);
+            if (!existingSpec) {
+              cb?.({ ok: false });
+              return;
+            }
+            existingSpec.socketId = socket.id;
+            existingSpec.connected = true;
+            touchRoom(room);
+            socketToHubRoom.set(socket.id, { code, playerId: existingSpec.id });
+            socket.join(`hub:${code}`);
+            broadcastRoomInfo(room);
+            cb?.({
+              ok: true,
+              room: getRoomInfo(room),
+              playerId: existingSpec.id,
+              role: 'spectator',
+              gameState: room.state
+                ? sanitizeHubGameStateForPlayer(room.state, '__spectator__')
+                : null,
+            });
             return;
           }
 
@@ -773,7 +873,63 @@ export function createHubRoomManager(io: Server): HubRoomManager {
           }
 
           const prev = room.state;
+          if (!prev) {
+            cb?.({ ok: false, error: 'Permainan belum dimulai.' });
+            return;
+          }
           touchRoom(room);
+
+          // 1-Click Rematch: promote queued spectators into open slots before resetting match
+          if (payload.action.type === 'play_again' && prev.phase === 'game_over' && player.isHost) {
+            const meta = getVariantMetadata(room.variantId);
+            const queuedSpecs = room.spectators.filter((s) => s.queuedForNextRound && s.connected);
+            const openSlots = Math.max(0, meta.maxPlayers - room.players.length);
+            const promoted = queuedSpecs.slice(0, openSlots);
+            if (promoted.length > 0) {
+              for (const spec of promoted) {
+                room.players.push({
+                  id: spec.id,
+                  sessionId: spec.sessionId,
+                  socketId: spec.socketId,
+                  name: spec.name,
+                  isHost: false,
+                  connected: true,
+                  ready: true,
+                });
+              }
+              const promotedIds = new Set(promoted.map((s) => s.id));
+              room.spectators = room.spectators.filter((s) => !promotedIds.has(s.id));
+              emitNotice(
+                room,
+                makeNotice(
+                  'joined',
+                  promoted.map((s) => s.name).join(', '),
+                  `${promoted.map((s) => s.name).join(', ')} bergabung dari antrean penonton!`
+                )
+              );
+            }
+
+            const ruleset = getRuleset(room.variantId);
+            const playerInits = buildHubOnlinePlayerInits(
+              room.players.map((p) => ({ id: p.id, name: p.name })),
+              room.variantId,
+              room.fillWithBots,
+              room.targetPlayerCount
+            );
+            const fresh = ruleset.initializeGame(playerInits, 'online', room.settings);
+            const connMap = new Map(room.players.map((p) => [p.id, p.connected]));
+            room.state = {
+              ...fresh,
+              players: fresh.players.map((gp) => ({
+                ...gp,
+                connected: gp.isAI ? true : connMap.get(gp.id) ?? true,
+              })),
+            };
+            broadcastRoomInfo(room);
+            broadcastGameState(room, true);
+            cb?.({ ok: true });
+            return;
+          }
 
           const updated = applyHubOnlineAction(prev, player.id, player.isHost, payload.action);
           if (updated !== prev) {
@@ -797,6 +953,37 @@ export function createHubRoomManager(io: Server): HubRoomManager {
           }
         }
       );
+
+      socket.on(
+        'hub:send_emote',
+        (payload: { emoteId?: string; label?: string }) => {
+          const ctx = getActiveRoomAndPlayer(socket);
+          if (!ctx || !payload?.label) return;
+          const { room, player } = ctx;
+          const cleanLabel = String(payload.label).slice(0, 20);
+          const cleanId = String(payload.emoteId ?? 'emote').slice(0, 20);
+          io.to(`hub:${room.code}`).emit('hub:emote', {
+            id: `em_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            playerId: player.id,
+            playerName: player.name,
+            emoteId: cleanId,
+            label: cleanLabel,
+          });
+        }
+      );
+
+      socket.on('hub:toggle_spectator_queue', (payload?: { queued?: boolean }) => {
+        const link = socketToHubRoom.get(socket.id);
+        if (!link) return;
+        const room = hubRooms.get(link.code);
+        if (!room) return;
+        const spec = room.spectators.find((s) => s.id === link.playerId);
+        if (!spec) return;
+        spec.queuedForNextRound =
+          typeof payload?.queued === 'boolean' ? payload.queued : !spec.queuedForNextRound;
+        touchRoom(room);
+        broadcastRoomInfo(room);
+      });
 
       socket.on('hub:leave_room', () => {
         handleHubDisconnect(socket, true);

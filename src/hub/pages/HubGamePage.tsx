@@ -1,15 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowUpDown,
   BookOpen,
   Clock,
+  Eye,
   Hand,
+  Info,
   Megaphone,
-  RotateCcw,
   ShieldAlert,
-  Trophy,
   Users,
   Volume2,
   VolumeX,
@@ -19,18 +20,31 @@ import {
   Zap,
 } from 'lucide-react';
 import { OnlinePlayerNotice } from '../../types/game';
+import { haptics } from '../../services/haptics';
 import { soundFX } from '../../services/sound';
 import { getVariantMetadata } from '../catalog';
 import { HubCardView } from '../components/HubCardView';
 import { ModeSignatureHud } from '../components/ModeSignatureHud';
+import { DirectionOrbitRing, getActiveColorGlow } from '../components/DirectionOrbitRing';
+import { AvatarTurnTimerRing } from '../components/AvatarTurnTimerRing';
+import { RadialColorPicker } from '../components/RadialColorPicker';
+import { ActiveRulesBadges } from '../components/ActiveRulesBadges';
+import { QuickEmoteBar } from '../components/QuickEmoteBar';
+import { ConnectionStatusBanner } from '../components/ConnectionStatusBanner';
+import { PodiumSummaryCard } from '../components/PodiumSummaryCard';
+import { sendHubEmote, subscribeHubEmotes } from '../services/hubOnlineClient';
 import { getModeTheme } from '../themes/modeThemes';
 import {
   callHubUno,
   catchHubUno,
   confirmPassDevice,
+  getCardDisplayColor,
+  getCardDisplayType,
+  getCardDisplayValue,
   getColorLabel,
   getValidColorsForState,
 } from '../engine/core';
+import { useColorblindMode } from '../utils/colorblind';
 import { DEFAULT_MERCY_LIMIT, applyOptionalMercyRule } from '../engine/houseRules';
 import { resolveReflexRaceTap } from '../expansions/addOnPacks';
 import { triggerComebackUnoCombo } from '../expansions/packSystemEngine';
@@ -49,6 +63,10 @@ interface HubGamePageProps {
   onlineRoomCode?: string | null;
   viewerPlayerId?: string | null;
   isOnlineHost?: boolean;
+  isSpectator?: boolean;
+  spectatorCount?: number;
+  spectatorQueued?: boolean;
+  onToggleSpectatorQueue?: () => void;
   connectionStatus?: 'connected' | 'reconnecting' | 'disconnected';
   onlineNotice?: OnlinePlayerNotice | null;
   onUpdateState: (updater: (prev: HubGameState) => HubGameState) => void;
@@ -57,18 +75,6 @@ interface HubGamePageProps {
   onRestartMatch: () => void;
   onOpenGuide: () => void;
 }
-
-const COLOR_BUTTON_STYLE: Record<HubCardColor, string> = {
-  red: 'bg-red-600 hover:bg-red-500 border-red-300',
-  yellow: 'bg-amber-400 hover:bg-amber-300 text-slate-950 border-amber-200',
-  green: 'bg-emerald-600 hover:bg-emerald-500 border-emerald-300',
-  blue: 'bg-blue-600 hover:bg-blue-500 border-blue-300',
-  pink: 'bg-pink-600 hover:bg-pink-500 border-pink-300',
-  teal: 'bg-teal-600 hover:bg-teal-500 border-teal-300',
-  orange: 'bg-orange-500 hover:bg-orange-400 border-orange-200',
-  purple: 'bg-purple-700 hover:bg-purple-600 border-purple-300',
-  wild: 'bg-slate-700 border-slate-400',
-};
 
 const COLOR_PILL_BG: Record<HubCardColor, string> = {
   red: 'bg-red-500',
@@ -87,6 +93,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
   onlineRoomCode,
   viewerPlayerId,
   isOnlineHost = true,
+  isSpectator = false,
+  spectatorCount = 0,
+  spectatorQueued = false,
+  onToggleSpectatorQueue,
   connectionStatus = 'connected',
   onlineNotice,
   onUpdateState,
@@ -116,20 +126,81 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
   const [dosSelectedPile, setDosSelectedPile] = useState<number>(0);
   const [muted, setMuted] = useState(() => soundFX.isMuted());
   const [onlineSecondsLeft, setOnlineSecondsLeft] = useState<number | null>(null);
+  const [autoSortHand, setAutoSortHand] = useState(false);
+  const [armedCardId, setArmedCardId] = useState<string | null>(null);
+  const [penaltyShakeKey, setPenaltyShakeKey] = useState(0);
+  const [showRulesModal, setShowRulesModal] = useState(false);
+  const [activeEmotes, setActiveEmotes] = useState<Record<string, { id: string; label: string }>>({});
+
+  const showEmoteForPlayer = (playerId: string, id: string, label: string) => {
+    setActiveEmotes((prev) => ({ ...prev, [playerId]: { id, label } }));
+    setTimeout(() => {
+      setActiveEmotes((prev) => {
+        if (prev[playerId]?.id !== id) return prev;
+        const copy = { ...prev };
+        delete copy[playerId];
+        return copy;
+      });
+    }, 2400);
+  };
+
+  useEffect(() => {
+    if (!isOnline) return;
+    return subscribeHubEmotes((evt) => {
+      showEmoteForPlayer(evt.playerId, evt.id, evt.label);
+    });
+  }, [isOnline]);
+
+  useEffect(() => {
+    if (!showRulesModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowRulesModal(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showRulesModal]);
+
+  const handleSendEmote = (emoteId: string, label: string) => {
+    if (!viewerPlayer) return;
+    if (isOnline) {
+      sendHubEmote(emoteId, label);
+    } else {
+      showEmoteForPlayer(viewerPlayer.id, `loc_${Date.now()}`, label);
+    }
+  };
+  const [isTouchDevice, setIsTouchDevice] = useState<boolean>(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(pointer: coarse)').matches
+      : false
+  );
+  const [colorblindMode, setColorblindMode] = useColorblindMode();
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(pointer: coarse)');
+    const onChange = (e: MediaQueryListEvent) => setIsTouchDevice(e.matches);
+    mq.addEventListener?.('change', onChange);
+    return () => mq.removeEventListener?.('change', onChange);
+  }, []);
 
   const currentPlayer = state.players[state.currentPlayerIndex];
-  const viewerPlayer = isOnline
+  const viewerPlayer = isSpectator
+    ? null
+    : isOnline
     ? state.players.find((p) => p.id === viewerPlayerId) ?? state.players[0]
     : state.mode === 'ai'
     ? state.players.find((p) => !p.isAI) ?? state.players[0]
     : currentPlayer;
 
   const isViewerTurn =
+    !isSpectator &&
     (state.phase === 'playing' || state.phase === 'party_pile_up') &&
-    viewerPlayer &&
-    currentPlayer?.id === viewerPlayer.id;
+    Boolean(viewerPlayer) &&
+    currentPlayer?.id === viewerPlayer?.id;
 
-  const isPromptForHuman = isOnline
+  const isPromptForHuman = isSpectator
+    ? false
+    : isOnline
     ? Boolean(state.pendingPrompt && viewerPlayer && state.pendingPrompt.actorId === viewerPlayer.id)
     : Boolean(
         state.pendingPrompt &&
@@ -150,14 +221,30 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
     return () => clearInterval(id);
   }, [isOnline, state.turnDeadline]);
 
-  // Sound FX feedback on events
+  // Sound FX & subtle shake feedback on events
   useEffect(() => {
     if (!state.lastEvent) return;
     const t = state.lastEvent.type;
-    if (t === 'uno_call' || t === 'speed_play') soundFX.playUnoCall();
-    else if (t === 'game_win' || t === 'round_end') soundFX.playVictoryFanfare();
-    else if (t === 'uno_penalty' || t === 'eliminated' || t === 'timeout') {
+    const isPenaltyEvent =
+      t === 'uno_penalty' ||
+      t === 'eliminated' ||
+      t === 'timeout' ||
+      t.includes('draw2') ||
+      t.includes('draw4') ||
+      t.includes('draw5') ||
+      t.includes('draw6') ||
+      t.includes('draw10') ||
+      t.includes('stack');
+
+    if (t === 'uno_call' || t === 'speed_play') {
+      soundFX.playUnoCall();
+      haptics.unoCall();
+    } else if (t === 'game_win' || t === 'round_end') {
+      soundFX.playVictoryFanfare();
+    } else if (isPenaltyEvent) {
       soundFX.playAlertBuzzer();
+      haptics.penaltyHit();
+      setPenaltyShakeKey((k) => k + 1);
     } else if (t === 'flip' || t === 'power_flip' || t === 'flex') {
       soundFX.playColumnMatch();
     } else {
@@ -165,10 +252,18 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
     }
   }, [state.lastEvent?.id]);
 
+  // Subtle haptic pulse when the viewer's turn begins
+  useEffect(() => {
+    if (isViewerTurn) {
+      haptics.turnStart();
+    }
+  }, [isViewerTurn, state.currentPlayerIndex]);
+
   // Reset per-turn toggles
   useEffect(() => {
     setUseFlexToggle(false);
     setDosSelectedFirst(null);
+    setArmedCardId(null);
   }, [state.currentPlayerIndex, state.roundNumber]);
 
   // Offline AI runs locally; online AI runs authoritatively on the server.
@@ -239,9 +334,11 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
   const topDiscard = state.discardPile[state.discardPile.length - 1];
   const validColors = getValidColorsForState(state);
 
-  // UNO Party (Number cards ONLY!) / Speed Pack Speed Jump-In exact match check
+  // UNO Party / Speed Pack / Lobby House Rule Jump-In exact match check
   const speedCutCard =
-    (state.variantId === 'uno-party' || (state.speedPhaseTurns ?? 0) > 0) &&
+    (state.variantId === 'uno-party' ||
+      (state.speedPhaseTurns ?? 0) > 0 ||
+      Boolean(state.settings.houseRuleJumpIn)) &&
     state.phase === 'playing' &&
     !isViewerTurn &&
     viewerPlayer &&
@@ -258,8 +355,9 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
         )
       : undefined;
 
-  const handleCardClick = (cardId: string) => {
+  const executeCardPlay = (cardId: string) => {
     if (!isViewerTurn || !viewerPlayer) return;
+    setArmedCardId(null);
 
     // DOS Mode: support discard_to_center stage, single match OR 2-card sum selection!
     if (state.variantId === 'dos-mode') {
@@ -310,13 +408,143 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
     );
   };
 
+  const handleCardClick = (cardId: string) => {
+    if (!isViewerTurn || !viewerPlayer) return;
+    // On touch devices (non-DOS), require 2-step confirmation tap (or swipe up) to prevent misclicks.
+    if (isTouchDevice && state.variantId !== 'dos-mode') {
+      if (armedCardId !== cardId) {
+        setArmedCardId(cardId);
+        return;
+      }
+    }
+    executeCardPlay(cardId);
+  };
+
+  const COLOR_SORT_ORDER: Record<string, number> = {
+    red: 0,
+    yellow: 1,
+    green: 2,
+    blue: 3,
+    pink: 4,
+    teal: 5,
+    orange: 6,
+    purple: 7,
+    wild: 8,
+  };
+
+  const displayedHand = useMemo(() => {
+    if (!viewerPlayer) return [];
+    if (!autoSortHand) return viewerPlayer.hand;
+    return [...viewerPlayer.hand].sort((a, b) => {
+      const ca = COLOR_SORT_ORDER[getCardDisplayColor(a, state.flipSide)] ?? 9;
+      const cb = COLOR_SORT_ORDER[getCardDisplayColor(b, state.flipSide)] ?? 9;
+      if (ca !== cb) return ca - cb;
+      const ta = getCardDisplayType(a, state.flipSide);
+      const tb = getCardDisplayType(b, state.flipSide);
+      if (ta === 'number' && tb === 'number') {
+        return (getCardDisplayValue(a, state.flipSide) ?? 0) - (getCardDisplayValue(b, state.flipSide) ?? 0);
+      }
+      if (ta === 'number') return -1;
+      if (tb === 'number') return 1;
+      return ta.localeCompare(tb);
+    });
+  }, [viewerPlayer, autoSortHand, state.flipSide]);
+
   const handleDrawOrPass = () => {
     if (!isViewerTurn || !viewerPlayer) return;
+    haptics.cardTap();
     dispatchAction(
       { type: 'draw_or_pass' },
       (prev) => ruleset.handleDrawOrPass(prev, viewerPlayer.id)
     );
   };
+
+  // Desktop keyboard shortcuts during viewer's turn (ArrowLeft/Right, Enter/Space, D, U)
+  useEffect(() => {
+    if (!isViewerTurn || !viewerPlayer || showRulesModal || state.pendingPrompt) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const key = e.key;
+      if (key === 'd' || key === 'D') {
+        e.preventDefault();
+        handleDrawOrPass();
+        return;
+      }
+
+      if (key === 'u' || key === 'U') {
+        if (
+          !viewerPlayer.isOut &&
+          !viewerPlayer.eliminated &&
+          state.variantId !== 'ono-99' &&
+          viewerPlayer.hand.length >= 1 &&
+          viewerPlayer.hand.length <= 2 &&
+          !viewerPlayer.calledUno
+        ) {
+          e.preventDefault();
+          haptics.unoCall();
+          dispatchAction({ type: 'call_uno' }, (prev) => callHubUno(prev, viewerPlayer.id));
+        }
+        return;
+      }
+
+      const playableIds = displayedHand
+        .filter((card) =>
+          state.variantId === 'dos-mode'
+            ? true
+            : ruleset.validateMove(state, viewerPlayer.id, {
+                cardId: card.id,
+                useFlex: state.variantId === 'uno-flex' ? useFlexToggle : undefined,
+              }).valid
+        )
+        .map((c) => c.id);
+
+      if (playableIds.length === 0) return;
+
+      if (key === 'ArrowRight' || key === 'ArrowLeft') {
+        e.preventDefault();
+        const currIdx = armedCardId ? playableIds.indexOf(armedCardId) : -1;
+        const nextIdx =
+          key === 'ArrowRight'
+            ? currIdx < 0
+              ? 0
+              : (currIdx + 1) % playableIds.length
+            : currIdx <= 0
+            ? playableIds.length - 1
+            : currIdx - 1;
+        setArmedCardId(playableIds[nextIdx]);
+        haptics.cardTap();
+        return;
+      }
+
+      if ((key === 'Enter' || key === ' ') && armedCardId && playableIds.includes(armedCardId)) {
+        e.preventDefault();
+        executeCardPlay(armedCardId);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    isViewerTurn,
+    viewerPlayer,
+    showRulesModal,
+    state.pendingPrompt,
+    displayedHand,
+    armedCardId,
+    useFlexToggle,
+    state,
+  ]);
 
   // PASS & PLAY PRIVACY SCREEN
   if (state.phase === 'pass_device' && currentPlayer) {
@@ -353,132 +581,22 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
     );
   }
 
-  // ROUND OVER / GAME OVER OVERLAY
   if (state.phase === 'round_over' || state.phase === 'game_over') {
-    const lastRound = state.roundHistory[state.roundHistory.length - 1];
-    const isGameOver = state.phase === 'game_over';
-
     return (
-      <div className={`min-h-screen ${tableTheme} flex items-center justify-center p-4 text-slate-100`}>
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="w-full max-w-lg rounded-3xl bg-slate-950/90 border border-amber-400/35 p-6 sm:p-8 space-y-6 shadow-2xl"
-        >
-          <div className="text-center space-y-2">
-            <div className="w-16 h-16 rounded-full bg-amber-400/20 border border-amber-400/50 flex items-center justify-center mx-auto">
-              <Trophy className="w-8 h-8 text-amber-300" />
-            </div>
-            <div className="text-xs font-bold uppercase tracking-widest text-amber-300">
-              {isGameOver ? `JUARA ${meta.name}!` : `RONDE ${state.roundNumber} SELESAI`}
-            </div>
-            <h2 className="font-display font-black italic text-3xl text-white">
-              {lastRound?.winnerName ?? 'Pemenang'}
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-300">{lastRound?.reason}</p>
-          </div>
-
-          {lastRound && (
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {lastRound.finalStandings && lastRound.finalStandings.length > 0
-                ? lastRound.finalStandings.map((st, idx, arr) => {
-                    const isLoser =
-                      st.status === 'active' &&
-                      idx === arr.length - 1 &&
-                      st.handCount > 0;
-                    const medal =
-                      st.rank === 1 ? '🥇' : st.rank === 2 ? '🥈' : st.rank === 3 ? '🥉' : `#${st.rank}`;
-                    return (
-                      <div
-                        key={st.playerId}
-                        className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs sm:text-sm"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="font-display font-black text-amber-300 w-7">
-                            {medal}
-                          </span>
-                          <span className="font-bold text-white">{st.playerName}</span>
-                          {st.status === 'eliminated' && (
-                            <span className="px-1.5 py-0.5 rounded bg-rose-500/25 text-rose-300 text-[10px] font-black">
-                              ☠️ MERCY OUT
-                            </span>
-                          )}
-                          {isLoser && (
-                            <span className="px-1.5 py-0.5 rounded bg-rose-500/25 text-rose-300 text-[10px] font-black">
-                              KALAH
-                            </span>
-                          )}
-                        </div>
-                        <div className="font-display font-black text-slate-300 text-xs">
-                          {st.status === 'finished'
-                            ? `Juara #${st.rank}`
-                            : `Sisa ${st.handCount} kartu`}
-                        </div>
-                      </div>
-                    );
-                  })
-                : lastRound.playerPoints.map((pp) => (
-                    <div
-                      key={pp.playerId}
-                      className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs sm:text-sm"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-white">{pp.playerName}</span>
-                        {pp.eliminated && (
-                          <span className="px-1.5 py-0.5 rounded bg-rose-500/25 text-rose-300 text-[10px] font-black">
-                            KNOCK OUT
-                          </span>
-                        )}
-                      </div>
-                      <div className="font-display font-black text-amber-300">
-                        {pp.totalScore} pts
-                      </div>
-                    </div>
-                  ))}
-            </div>
-          )}
-
-          <div className="flex flex-col sm:flex-row gap-2.5">
-            {!isGameOver ? (
-              isOnlineHost ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    dispatchAction({ type: 'next_round' }, (prev) => ruleset.resetRound(prev))
-                  }
-                  className="flex-1 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 font-display font-black text-sm cursor-pointer"
-                >
-                  LANJUT RONDE {state.roundNumber + 1}
-                </button>
-              ) : (
-                <div className="flex-1 py-3.5 px-4 rounded-2xl bg-slate-900 border border-slate-700 text-slate-300 text-center font-display font-bold text-xs sm:text-sm">
-                  Menunggu Host memulai Ronde {state.roundNumber + 1}...
-                </div>
-              )
-            ) : isOnlineHost ? (
-              <button
-                type="button"
-                onClick={onRestartMatch}
-                className="flex-1 py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-display font-black text-sm flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <RotateCcw className="w-4 h-4" />
-                MAIN LAGI
-              </button>
-            ) : (
-              <div className="flex-1 py-3.5 px-4 rounded-2xl bg-slate-900 border border-slate-700 text-slate-300 text-center font-display font-bold text-xs sm:text-sm">
-                Menunggu Host memulai ulang...
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={onExitToHub}
-              className="py-3.5 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-display font-bold text-sm cursor-pointer"
-            >
-              Ke UNO Hub
-            </button>
-          </div>
-        </motion.div>
-      </div>
+      <PodiumSummaryCard
+        state={state}
+        meta={meta}
+        tableTheme={tableTheme}
+        isOnlineHost={isOnlineHost}
+        isSpectator={isSpectator}
+        spectatorQueued={spectatorQueued}
+        onToggleSpectatorQueue={onToggleSpectatorQueue}
+        onNextRound={() =>
+          dispatchAction({ type: 'next_round' }, (prev) => ruleset.resetRound(prev))
+        }
+        onRematch={onRestartMatch}
+        onExitToHub={onExitToHub}
+      />
     );
   }
 
@@ -489,6 +607,7 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
 
   return (
     <div className={`min-h-screen ${tableTheme} text-slate-100 flex flex-col justify-between transition-colors duration-300 relative overflow-x-hidden`}>
+      {isOnline && <ConnectionStatusBanner status={connectionStatus} />}
       <header className={`relative z-20 px-3 sm:px-6 py-2.5 ${modeTheme.headerBgClass} border-b ${modeTheme.headerBorderClass} flex items-center justify-between gap-2`}>
         <div className="flex items-center gap-2 min-w-0">
           <button
@@ -556,7 +675,30 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <button
+            type="button"
+            aria-pressed={colorblindMode}
+            onClick={() => setColorblindMode(!colorblindMode)}
+            aria-label={colorblindMode ? 'Nonaktifkan Mode Buta Warna' : 'Aktifkan Mode Buta Warna'}
+            title={colorblindMode ? 'Mode Buta Warna: Aktif' : 'Mode Buta Warna: Nonaktif'}
+            className={`min-h-11 min-w-11 p-2.5 rounded-xl border flex items-center justify-center transition ${
+              colorblindMode
+                ? 'bg-amber-400 border-amber-300 text-slate-950'
+                : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300'
+            }`}
+          >
+            <Eye className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowRulesModal(true)}
+            aria-label="Lihat aturan aktif meja ini"
+            title="Aturan Aktif"
+            className="min-h-11 min-w-11 p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-300 flex items-center justify-center transition"
+          >
+            <Info className="w-4 h-4" />
+          </button>
           <button
             type="button"
             onClick={onOpenGuide}
@@ -619,7 +761,7 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                     ? { repeat: Infinity, duration: 1.4, repeatDelay: 0.6 }
                     : undefined
                 }
-                className={`shrink-0 px-3 py-2 rounded-2xl border transition flex flex-col gap-1 min-w-[110px] ${
+                className={`relative shrink-0 px-3 py-2 rounded-2xl border transition flex flex-col gap-1 min-w-[110px] ${
                   p.eliminated
                     ? 'bg-rose-950/60 border-rose-500/40 opacity-60'
                     : isCurrent
@@ -627,48 +769,70 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                     : `bg-slate-900/75 ${teamBorder || 'border-white/10'}`
                 }`}
               >
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    {isOnline && !p.isAI && (
-                      <span
-                        className={`w-2 h-2 rounded-full shrink-0 ${
-                          p.connected === false ? 'bg-rose-500' : 'bg-emerald-400'
-                        }`}
-                        title={p.connected === false ? 'Terputus' : 'Online'}
-                      />
-                    )}
-                    <span className="font-display font-bold text-xs sm:text-sm text-white">
-                      {p.name}
-                    </span>
-                    {isOnline && p.connected === false && (
-                      <span className="px-1.5 py-0.5 rounded bg-rose-500/30 text-rose-200 text-[9px] font-black">
-                        OFFLINE
+                <AnimatePresence>
+                  {activeEmotes[p.id] && (
+                    <motion.div
+                      key={activeEmotes[p.id].id}
+                      initial={{ opacity: 0, y: 6, scale: 0.85 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -6, scale: 0.9 }}
+                      className="pointer-events-none absolute -top-3 right-2 z-30 px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-display font-black text-[11px] shadow-lg border border-amber-200"
+                    >
+                      {activeEmotes[p.id].label}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                <div className="flex items-center gap-2">
+                  <AvatarTurnTimerRing
+                    name={p.name}
+                    isCurrent={isCurrent}
+                    secondsLeft={isCurrent ? onlineSecondsLeft : null}
+                    maxSeconds={30}
+                    eliminated={p.eliminated}
+                  />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      {isOnline && !p.isAI && (
+                        <span
+                          className={`w-2 h-2 rounded-full shrink-0 ${
+                            p.connected === false ? 'bg-rose-500' : 'bg-emerald-400'
+                          }`}
+                          title={p.connected === false ? 'Terputus' : 'Online'}
+                        />
+                      )}
+                      <span className="font-display font-bold text-xs sm:text-sm text-white truncate max-w-[92px]">
+                        {p.name}
                       </span>
-                    )}
-                    {isPartner && (
-                      <span className="px-1.5 py-0.5 rounded bg-sky-500/30 text-sky-200 text-[9px] font-black">
-                        REKAN
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] text-slate-300 flex items-center gap-2">
-                    {p.eliminated ? (
-                      <span className="text-rose-400 font-black">☠️ TERSINGKIR</span>
-                    ) : p.isOut ? (
-                      <span className="text-emerald-300 font-black">
-                        {finishRank > 0 ? `🏅 JUARA #${finishRank}` : '✓ KELUAR'}
-                      </span>
-                    ) : (
-                      <span className={nearMercy ? 'text-rose-300 font-black' : ''}>
-                        {p.hand.length} kartu
-                        {mercyLimit !== null ? ` / ${mercyLimit}` : ''}
-                      </span>
-                    )}
-                    {p.powerActive !== undefined && (
-                      <span className={p.powerActive ? 'text-emerald-300 font-black' : 'text-rose-300 font-black'}>
-                        ⚡{p.powerActive ? 'ON' : 'OFF'}
-                      </span>
-                    )}
+                      {isOnline && p.connected === false && (
+                        <span className="px-1.5 py-0.5 rounded bg-rose-500/30 text-rose-200 text-[9px] font-black">
+                          OFFLINE
+                        </span>
+                      )}
+                      {isPartner && (
+                        <span className="px-1.5 py-0.5 rounded bg-sky-500/30 text-sky-200 text-[9px] font-black">
+                          REKAN
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-slate-300 flex items-center gap-2">
+                      {p.eliminated ? (
+                        <span className="text-rose-400 font-black">TERSINGKIR</span>
+                      ) : p.isOut ? (
+                        <span className="text-emerald-300 font-black">
+                          {finishRank > 0 ? `JUARA #${finishRank}` : 'KELUAR'}
+                        </span>
+                      ) : (
+                        <span className={nearMercy ? 'text-rose-300 font-black' : ''}>
+                          {p.hand.length} kartu
+                          {mercyLimit !== null ? ` / ${mercyLimit}` : ''}
+                        </span>
+                      )}
+                      {p.powerActive !== undefined && (
+                        <span className={p.powerActive ? 'text-emerald-300 font-black' : 'text-rose-300 font-black'}>
+                          {p.powerActive ? 'FLEX ON' : 'FLEX OFF'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
                 {/* Visual Mercy Meter Bar (No Mercy & Optional Mercy Rule) */}
@@ -686,6 +850,23 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                     />
                   </div>
                 )}
+
+                {state.unoVulnerablePlayerId === p.id &&
+                  viewerPlayer &&
+                  p.id !== viewerPlayer.id && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        dispatchAction({ type: 'catch_uno' }, (prev) =>
+                          applyOptionalMercyRule(catchHubUno(prev, viewerPlayer.name))
+                        )
+                      }
+                      className="mt-1 w-full min-h-9 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-display font-black text-[11px] flex items-center justify-center gap-1 shadow-md transition"
+                    >
+                      <ShieldAlert className="w-3.5 h-3.5" />
+                      CATCH! (+2)
+                    </button>
+                  )}
               </motion.div>
             );
           })}
@@ -693,7 +874,12 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
       </section>
 
       {/* Center Table Arena */}
-      <main className="flex-1 flex flex-col items-center justify-center px-4 py-3 gap-3.5">
+      <motion.main
+        key={`arena-${penaltyShakeKey}`}
+        animate={penaltyShakeKey > 0 ? { x: [0, -6, 6, -4, 4, 0] } : undefined}
+        transition={{ duration: 0.36 }}
+        className="flex-1 flex flex-col items-center justify-center px-4 py-3 gap-3.5"
+      >
         {onlineNotice && (
           <div className="max-w-xl w-full text-center px-4 py-2 rounded-2xl bg-sky-500/20 border border-sky-400/50 text-xs font-bold text-sky-100 shadow-lg">
             🔔 {onlineNotice.message}
@@ -1022,8 +1208,13 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-center gap-5 sm:gap-8">
-            <div className="flex flex-col items-center gap-1.5">
+          <div
+            className="relative flex items-center justify-center gap-6 sm:gap-10 px-6 py-4 rounded-3xl transition-shadow duration-500"
+            style={{
+              boxShadow: `0 0 60px ${getActiveColorGlow(state.activeColor)}`,
+            }}
+          >
+            <div className="flex flex-col items-center gap-1.5 z-10">
               <HubCardView
                 variantId={variantId}
                 faceDown
@@ -1038,28 +1229,44 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
               </span>
             </div>
 
-            <div className="flex flex-col items-center gap-1.5">
-              <div
-                className={
-                  state.variantId === 'uno-liars'
-                    ? 'p-2 rounded-3xl bg-violet-950/70 border border-violet-400/45 shadow-xl shadow-violet-500/20'
-                    : ''
-                }
-              >
-                <HubCardView
-                  variantId={variantId}
-                  card={topDiscard}
-                  faceDown={Boolean(
-                    state.variantId === 'uno-liars' && (state.phase === 'liar_challenge' || state.liarsTopClaim)
-                  )}
-                  flipSide={state.flipSide}
-                  size="md"
+            <div className="flex flex-col items-center gap-2 z-10">
+              <div className="relative">
+                <DirectionOrbitRing
+                  direction={state.direction}
+                  activeColor={state.activeColor}
                 />
+                <div
+                  className={
+                    state.variantId === 'uno-liars'
+                      ? 'relative z-10 p-2 rounded-3xl bg-violet-950/70 border border-violet-400/45 shadow-xl shadow-violet-500/20'
+                      : 'relative z-10'
+                  }
+                >
+                  <AnimatePresence mode="popLayout">
+                    <motion.div
+                      key={topDiscard?.id ?? 'empty'}
+                      initial={{ scale: 1.16, y: -18, rotate: state.direction === 1 ? -5 : 5, opacity: 0 }}
+                      animate={{ scale: 1, y: 0, rotate: 0, opacity: 1 }}
+                      exit={{ scale: 0.9, opacity: 0 }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 22 }}
+                    >
+                      <HubCardView
+                        variantId={variantId}
+                        card={topDiscard}
+                        faceDown={Boolean(
+                          state.variantId === 'uno-liars' && (state.phase === 'liar_challenge' || state.liarsTopClaim)
+                        )}
+                        flipSide={state.flipSide}
+                        size="md"
+                      />
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
               </div>
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-950/80 border border-white/15 text-[11px] font-bold">
+              <div className="relative z-10 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-950/90 border border-white/15 text-xs font-bold">
                 <span className={`w-2.5 h-2.5 rounded-full ${COLOR_PILL_BG[state.activeColor]}`} />
                 {state.variantId === 'uno-liars' && state.liarsTopClaim
-                  ? `🎭 Klaim: ${getColorLabel(state.liarsTopClaim.color)} ${
+                  ? `Klaim: ${getColorLabel(state.liarsTopClaim.color)} ${
                       state.liarsTopClaim.type === 'number'
                         ? state.liarsTopClaim.value
                         : state.liarsTopClaim.type.toUpperCase()
@@ -1183,7 +1390,7 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                 onClick={() =>
                   dispatchAction({ type: 'call_uno' }, (prev) => callHubUno(prev, viewerPlayer.id))
                 }
-                className="px-5 py-2 rounded-2xl bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500 text-slate-950 font-display font-black text-xs shadow-xl flex items-center gap-1.5 cursor-pointer"
+                className="min-h-11 px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-display font-black text-xs sm:text-sm uno-critical-pulse flex items-center gap-1.5 transition"
               >
                 <Megaphone className="w-4 h-4" />
                 {state.variantId === 'dos-mode' ? 'TERIAK DOS!' : 'TERIAK UNO!'}
@@ -1207,16 +1414,47 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
               </button>
             )}
         </div>
-      </main>
+      </motion.main>
 
-      {viewerPlayer && (
+      {isSpectator ? (
+        <section
+          aria-label="Bar mode penonton"
+          className="px-4 sm:px-6 pb-safe pt-3 bg-slate-950/95 border-t border-sky-400/35"
+        >
+          <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs sm:text-sm text-sky-200 font-semibold">
+              <Eye className="w-4 h-4 text-sky-400 shrink-0" />
+              <span>
+                Mode Penonton Aktif ({spectatorCount} penonton) • Isi kartu pemain disembunyikan
+              </span>
+            </div>
+            {onToggleSpectatorQueue && (
+              <button
+                type="button"
+                aria-pressed={spectatorQueued}
+                onClick={onToggleSpectatorQueue}
+                className={`min-h-11 px-4 py-2 rounded-xl font-display font-black text-xs transition shrink-0 ${
+                  spectatorQueued
+                    ? 'bg-emerald-400 hover:bg-emerald-300 text-slate-950'
+                    : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
+                }`}
+              >
+                {spectatorQueued
+                  ? 'Terdaftar untuk Ronde Berikutnya'
+                  : 'Ikut Main di Ronde Berikutnya'}
+              </button>
+            )}
+          </div>
+        </section>
+      ) : (
+        viewerPlayer && (
         <section
           aria-label="Kartu di tangan pemain"
-          className="px-3 sm:px-6 pb-5 pt-3 bg-slate-950/95 border-t border-slate-800"
+          className="px-3 sm:px-6 pb-safe pt-3 bg-slate-950/95 border-t border-slate-800"
         >
           <div className="max-w-5xl mx-auto space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-display font-black text-white">
                   Tangan {viewerPlayer.name} ({viewerPlayer.hand.length} kartu)
                 </span>
@@ -1227,17 +1465,39 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                 ) : (
                   <span className="text-slate-300">Menunggu {currentPlayer?.name}...</span>
                 )}
+                {isTouchDevice && armedCardId && (
+                  <span className="text-[11px] font-bold text-emerald-300">
+                    Tap sekali lagi atau geser ke atas untuk buang
+                  </span>
+                )}
               </div>
-              {state.variantId === 'uno-teams' && partner && (
-                <span className="text-[11px] text-sky-300 font-bold flex items-center gap-1">
-                  <Users className="w-3.5 h-3.5" />
-                  {TEAM_NAMES[viewerPlayer.teamId ?? 0]} • Rekan: {partner.name} ({partner.hand.length})
-                </span>
-              )}
+              <div className="flex items-center gap-2 flex-wrap">
+                {state.variantId === 'uno-teams' && partner && (
+                  <span className="text-[11px] text-sky-300 font-bold flex items-center gap-1">
+                    <Users className="w-3.5 h-3.5" />
+                    {TEAM_NAMES[viewerPlayer.teamId ?? 0]} • Rekan: {partner.name} ({partner.hand.length})
+                  </span>
+                )}
+                <QuickEmoteBar onSendEmote={handleSendEmote} />
+                <button
+                  type="button"
+                  aria-pressed={autoSortHand}
+                  onClick={() => setAutoSortHand((prev) => !prev)}
+                  className={`min-h-9 px-3 py-1.5 rounded-lg border text-[11px] font-display font-bold inline-flex items-center gap-1.5 transition ${
+                    autoSortHand
+                      ? 'bg-amber-400 text-slate-950 border-amber-300'
+                      : 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-700'
+                  }`}
+                  title="Urutkan kartu berdasarkan warna dan nilai"
+                >
+                  <ArrowUpDown className="w-3.5 h-3.5" />
+                  {autoSortHand ? 'Urut: Warna & Nilai' : 'Urutkan'}
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-end gap-2 overflow-x-auto pb-2 pt-3 px-2 sm:px-1">
-              {viewerPlayer.hand.map((card) => {
+            <div className="flex items-end gap-2 overflow-x-auto pb-2 pt-7 px-2 sm:px-1">
+              {displayedHand.map((card) => {
                 const validation = isViewerTurn
                   ? state.variantId === 'dos-mode'
                     ? { valid: true }
@@ -1255,8 +1515,10 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                       size="md"
                       playable={validation.valid}
                       selected={dosSelectedFirst === card.id}
+                      armed={armedCardId === card.id && validation.valid}
                       dimmed={isViewerTurn && !validation.valid}
                       onClick={() => handleCardClick(card.id)}
+                      onSwipeUp={() => executeCardPlay(card.id)}
                     />
                   </div>
                 );
@@ -1264,7 +1526,54 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
             </div>
           </div>
         </section>
-      )}
+      ))}
+
+      <AnimatePresence>
+        {showRulesModal && (
+          <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Aturan aktif ${meta.name}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => setShowRulesModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.94, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700 p-5 space-y-4 shadow-2xl"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                    Info Meja
+                  </div>
+                  <h3 className="font-display font-black text-lg text-white">
+                    Aturan Aktif • {meta.name}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Tutup info aturan"
+                  onClick={() => setShowRulesModal(false)}
+                  className="min-h-11 min-w-11 p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <ActiveRulesBadges
+                variantId={state.variantId}
+                settings={state.settings}
+                playerCount={state.players.length}
+              />
+              <p className="text-xs text-slate-300 leading-relaxed">{meta.description}</p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {isPromptForHuman && state.pendingPrompt && (
@@ -1312,24 +1621,16 @@ export const HubGamePage: React.FC<HubGamePageProps> = ({
                 )}
               </div>
 
-              {/* Color Picker */}
+              {/* Radial 4-Quadrant Wild Color Picker */}
               {(state.pendingPrompt.type === 'color' || state.pendingPrompt.type === 'roulette_color') && (
-                <div className="grid grid-cols-2 gap-3">
-                  {validColors.map((col) => (
-                    <button
-                      key={col}
-                      type="button"
-                      onClick={() =>
-                        dispatchAction({ type: 'resolve_prompt', payload: { color: col } }, (prev) =>
-                          ruleset.resolvePrompt(prev, { color: col })
-                        )
-                      }
-                      className={`py-4 rounded-2xl border-2 font-display font-black text-base text-white shadow-lg cursor-pointer ${COLOR_BUTTON_STYLE[col]}`}
-                    >
-                      {getColorLabel(col)}
-                    </button>
-                  ))}
-                </div>
+                <RadialColorPicker
+                  colors={validColors}
+                  onSelect={(col) =>
+                    dispatchAction({ type: 'resolve_prompt', payload: { color: col } }, (prev) =>
+                      ruleset.resolvePrompt(prev, { color: col })
+                    )
+                  }
+                />
               )}
 
               {/* UNO Flip, UNO Flex & UNO Party Wild Draw Challenge Modal */}

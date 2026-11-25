@@ -95,6 +95,22 @@ export const unoClassicRuleset: UnoRuleset = {
     const card = current.hand.find((c) => c.id === move.cardId);
     if (!card) return { valid: false, reason: 'Kartu tidak ditemukan di tangan.' };
 
+    // House Rule: Stacking (+2 / +4)
+    if (state.settings.houseRuleStacking && state.pendingDrawCount > 0) {
+      const cardDrawVal = card.type === 'draw2' ? 2 : card.type === 'wild_draw4' ? 4 : 0;
+      const minRequired = state.pendingDrawMinValue ?? 2;
+      if (cardDrawVal < minRequired) {
+        return {
+          valid: false,
+          reason: `Tumpukan +${state.pendingDrawCount} aktif: mainkan kartu Draw minimal +${minRequired} atau ambil penalti.`,
+        };
+      }
+      return {
+        valid: true,
+        requiresColor: card.type === 'wild_draw4',
+      };
+    }
+
     if (card.type === 'wild_draw4' && state.settings.strictWildDraw4) {
       const hasMatchingColor = current.hand.some(
         (c) => c.id !== card.id && c.color === state.activeColor
@@ -158,7 +174,9 @@ export const unoClassicRuleset: UnoRuleset = {
     let eventType = 'play';
     let message = `${current.name} memainkan ${card.type === 'number' ? `${getColorLabel(card.color)} ${card.value}` : card.type.toUpperCase()}.`;
 
-    // Check immediate round win before applying victim draws if empty? Official Mattel: Draw Two / Wild Draw Four still adds cards to next player before scoring!
+    let pendingDrawCount = state.pendingDrawCount;
+    let pendingDrawMinValue = state.pendingDrawMinValue;
+
     if (card.type === 'reverse') {
       if (activeCount === 2) {
         steps = 2;
@@ -175,22 +193,73 @@ export const unoClassicRuleset: UnoRuleset = {
       message = `${current.name} melewati giliran ${skipped?.name}!`;
     } else if (card.type === 'draw2' || card.type === 'wild_draw4') {
       const count = card.type === 'draw2' ? 2 : 4;
-      const victimIdx = getNextPlayerIndex(players, state.currentPlayerIndex, direction, 1);
-      const drawRes = drawCardsFromDeck(drawPile, discardPile, count);
-      drawPile = drawRes.drawPile;
-      discardPile = drawRes.discardPile;
-      players = players.map((p, idx) =>
-        idx === victimIdx ? { ...p, hand: [...p.hand, ...drawRes.drawn], calledUno: false } : p
-      );
-      steps = 2;
-      eventType = card.type;
-      message =
-        card.type === 'wild_draw4'
-          ? `${current.name} memainkan WILD +4 (${getColorLabel(activeColor)})! ${players[victimIdx].name} ambil 4 kartu.`
-          : `${current.name} memainkan DRAW +2! ${players[victimIdx].name} ambil 2 kartu.`;
+      if (state.settings.houseRuleStacking) {
+        pendingDrawCount = (state.pendingDrawCount || 0) + count;
+        pendingDrawMinValue = Math.max(state.pendingDrawMinValue ?? 2, count);
+        steps = 1;
+        eventType = card.type;
+        message = `${current.name} menumpuk +${count} (Total penalti: +${pendingDrawCount})!`;
+      } else {
+        const victimIdx = getNextPlayerIndex(players, state.currentPlayerIndex, direction, 1);
+        const drawRes = drawCardsFromDeck(drawPile, discardPile, count);
+        drawPile = drawRes.drawPile;
+        discardPile = drawRes.discardPile;
+        players = players.map((p, idx) =>
+          idx === victimIdx ? { ...p, hand: [...p.hand, ...drawRes.drawn], calledUno: false } : p
+        );
+        steps = 2;
+        eventType = card.type;
+        message =
+          card.type === 'wild_draw4'
+            ? `${current.name} memainkan WILD +4 (${getColorLabel(activeColor)})! ${players[victimIdx].name} ambil 4 kartu.`
+            : `${current.name} memainkan DRAW +2! ${players[victimIdx].name} ambil 2 kartu.`;
+      }
     } else if (card.type === 'wild') {
       eventType = 'wild';
       message = `${current.name} memainkan WILD → warna ${getColorLabel(activeColor)}!`;
+    } else if (
+      state.settings.houseRuleSevenZero &&
+      card.type === 'number' &&
+      (card.value === 0 || card.value === 7) &&
+      remainingHand.length > 0
+    ) {
+      if (card.value === 0) {
+        // 0's Pass: rotate all active players' hands in play direction
+        const activeIndices = players
+          .map((p, i) => (!p.isOut && !p.eliminated ? i : -1))
+          .filter((i) => i >= 0);
+        if (activeIndices.length >= 2) {
+          const prevHands = activeIndices.map((i) => players[i].hand);
+          activeIndices.forEach((pIdx, pos) => {
+            const fromPos =
+              direction === 1
+                ? (pos - 1 + activeIndices.length) % activeIndices.length
+                : (pos + 1) % activeIndices.length;
+            players[pIdx] = { ...players[pIdx], hand: prevHands[fromPos], calledUno: false };
+          });
+          eventType = 'zero_pass';
+          message = `${current.name} memainkan 0 (Aturan 7-0): semua kartu tangan dioper sesuai arah main!`;
+        }
+      } else if (card.value === 7) {
+        // 7's Swap: swap hands with next active player
+        const targetIdx = getNextPlayerIndex(players, state.currentPlayerIndex, direction, 1);
+        if (targetIdx !== state.currentPlayerIndex) {
+          const myHand = players[state.currentPlayerIndex].hand;
+          const theirHand = players[targetIdx].hand;
+          players[state.currentPlayerIndex] = {
+            ...players[state.currentPlayerIndex],
+            hand: theirHand,
+            calledUno: false,
+          };
+          players[targetIdx] = {
+            ...players[targetIdx],
+            hand: myHand,
+            calledUno: false,
+          };
+          eventType = 'seven_swap';
+          message = `${current.name} memainkan 7 (Aturan 7-0): bertukar tangan dengan ${players[targetIdx].name}!`;
+        }
+      }
     }
 
     const unoVulnerablePlayerId =
@@ -205,6 +274,8 @@ export const unoClassicRuleset: UnoRuleset = {
         drawPile,
         discardPile,
         activeColor,
+        pendingDrawCount,
+        pendingDrawMinValue,
         pendingPrompt: null,
         unoVulnerablePlayerId,
       },
@@ -254,6 +325,30 @@ export const unoClassicRuleset: UnoRuleset = {
   },
 
   handleDrawOrPass(state, playerId) {
+    if (state.settings.houseRuleStacking && state.pendingDrawCount > 0) {
+      const current = state.players[state.currentPlayerIndex];
+      if (!current || current.id !== playerId) return state;
+      const count = state.pendingDrawCount;
+      const drawRes = drawCardsFromDeck(state.drawPile, state.discardPile, count);
+      const players = state.players.map((p, idx) =>
+        idx === state.currentPlayerIndex
+          ? { ...p, hand: [...p.hand, ...drawRes.drawn], calledUno: false }
+          : p
+      );
+      const next = appendEvent(
+        {
+          ...state,
+          players,
+          drawPile: drawRes.drawPile,
+          discardPile: drawRes.discardPile,
+          pendingDrawCount: 0,
+          pendingDrawMinValue: undefined,
+        },
+        'stack_draw',
+        `${current.name} mengambil tumpukan penalti +${count} kartu.`
+      );
+      return this.advanceTurn(next, 1);
+    }
     return standardDrawOneAndAdvance(state, playerId);
   },
 

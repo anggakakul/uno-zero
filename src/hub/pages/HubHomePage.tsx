@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   BookOpen,
+  Bot,
   Clock,
   Gamepad2,
   Play,
@@ -10,12 +11,14 @@ import {
   Settings,
   Users,
 } from 'lucide-react';
+import { preloadHubAssets } from '../../services/preloader';
 import { VARIANT_CATALOG } from '../catalog';
 import { hasVariantSave } from '../storage';
 import { GameCategory, VariantId, VariantMetadata } from '../types';
 
 interface HubHomePageProps {
   onSelectVariant: (variantId: VariantId) => void;
+  onQuickPlayBot: () => void;
   onOpenGuide: (variantId: VariantId) => void;
   onOpenSettings: () => void;
 }
@@ -39,11 +42,16 @@ const DIFFICULTY_BADGE: Record<VariantMetadata['difficulty'], string> = {
 
 export const HubHomePage: React.FC<HubHomePageProps> = ({
   onSelectVariant,
+  onQuickPlayBot,
   onOpenGuide,
   onOpenSettings,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<'ALL' | GameCategory>('ALL');
+
+  useEffect(() => {
+    preloadHubAssets();
+  }, []);
 
   const filteredModes = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -190,6 +198,15 @@ export const HubHomePage: React.FC<HubHomePageProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onQuickPlayBot}
+              className="min-h-11 px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs sm:text-sm font-display font-black flex items-center justify-center gap-1.5 transition"
+              title="Langsung main UNO Classic melawan Bot AI"
+            >
+              <Bot className="w-4 h-4" />
+              <span>Main vs Bot</span>
+            </button>
             <button
               type="button"
               onClick={() => onOpenGuide('uno-classic')}

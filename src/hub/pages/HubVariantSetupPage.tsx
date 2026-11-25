@@ -466,6 +466,51 @@ export const HubVariantSetupPage: React.FC<HubVariantSetupPageProps> = ({
                 </div>
               )}
 
+              {variantId === 'uno-classic' && (
+                <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+                  <div className="text-xs font-display font-bold text-slate-200">
+                    House Rules Opsional (Lobby)
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {([
+                      {
+                        key: 'houseRuleStacking' as const,
+                        label: 'Stacking (+2/+4)',
+                        desc: 'Tumpuk kartu Draw untuk meneruskan penalti',
+                      },
+                      {
+                        key: 'houseRuleSevenZero' as const,
+                        label: 'Aturan 7-0',
+                        desc: '7 tukar tangan, 0 oper semua tangan',
+                      },
+                      {
+                        key: 'houseRuleJumpIn' as const,
+                        label: 'Jump-In',
+                        desc: 'Potong giliran dengan kartu kembar persis',
+                      },
+                    ]).map((hr) => {
+                      const active = Boolean(settings[hr.key]);
+                      return (
+                        <button
+                          key={hr.key}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => updateSetting(hr.key, !active)}
+                          className={`min-h-11 p-2.5 rounded-xl border text-left transition ${
+                            active
+                              ? 'bg-amber-400/20 border-amber-400 text-white'
+                              : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-600'
+                          }`}
+                        >
+                          <div className="text-xs font-display font-black">{hr.label}</div>
+                          <div className="text-[10px] opacity-80 leading-snug mt-0.5">{hr.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {supportsOptionalMercyRule(variantId) && (
                 <div className="p-3.5 rounded-xl bg-rose-950/35 border border-rose-500/35 space-y-2.5">
                   <label className="flex items-center justify-between gap-3 cursor-pointer">

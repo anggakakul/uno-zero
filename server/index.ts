@@ -640,6 +640,7 @@ export function createUnoServer() {
         }
 
         const state = room.gameState;
+        if (!state) return;
         const activePlayer = state.players[state.currentPlayerIndex];
         touchRoom(room);
 

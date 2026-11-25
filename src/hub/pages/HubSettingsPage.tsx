@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Trash2, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeft, Eye, Trash2, Volume2, VolumeX } from 'lucide-react';
 import { soundFX } from '../../services/sound';
 import { VARIANT_CATALOG } from '../catalog';
 import {
@@ -8,6 +8,7 @@ import {
   loadHubPreferences,
   saveHubPreferences,
 } from '../storage';
+import { ColorblindSymbol } from '../utils/colorblind';
 
 interface HubSettingsPageProps {
   onBack: () => void;
@@ -69,6 +70,51 @@ export const HubSettingsPage: React.FC<HubSettingsPageProps> = ({ onBack }) => {
                 {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                 {muted ? 'Mati' : 'Aktif'}
               </button>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="font-display font-bold text-sm text-white flex items-center gap-1.5">
+                    <Eye className="w-4 h-4 text-amber-400" />
+                    Mode Buta Warna (Colorblind Mode)
+                  </div>
+                  <div className="text-xs text-slate-300">
+                    Tampilkan simbol geometris unik di sudut setiap kartu sesuai warnanya.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-pressed={Boolean(prefs.colorblindMode)}
+                  onClick={() => {
+                    const updated = { ...prefs, colorblindMode: !prefs.colorblindMode };
+                    setPrefs(updated);
+                    saveHubPreferences(updated);
+                  }}
+                  className={`min-h-11 px-4 py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition shrink-0 ${
+                    prefs.colorblindMode
+                      ? 'bg-amber-400 hover:bg-amber-300 text-slate-950'
+                      : 'bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700'
+                  }`}
+                >
+                  <Eye className="w-4 h-4" />
+                  {prefs.colorblindMode ? 'Aktif' : 'Nonaktif'}
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/80 text-[11px] font-semibold">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-600/25 border border-red-400/40 text-red-200">
+                  <ColorblindSymbol color="red" size={12} /> Merah
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/25 border border-amber-400/40 text-amber-200">
+                  <ColorblindSymbol color="yellow" size={12} /> Kuning
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600/25 border border-emerald-400/40 text-emerald-200">
+                  <ColorblindSymbol color="green" size={12} /> Hijau
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-600/25 border border-blue-400/40 text-blue-200">
+                  <ColorblindSymbol color="blue" size={12} /> Biru
+                </span>
+              </div>
             </div>
 
             <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">

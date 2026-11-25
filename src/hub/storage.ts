@@ -11,6 +11,7 @@ export interface HubPreferences {
   defaultPlayerName: string;
   soundEnabled: boolean;
   animationsEnabled: boolean;
+  colorblindMode: boolean;
 }
 
 export interface VariantMatchHistoryItem {
@@ -28,6 +29,7 @@ const DEFAULT_PREFS: HubPreferences = {
   defaultPlayerName: 'Pemain 1',
   soundEnabled: true,
   animationsEnabled: true,
+  colorblindMode: false,
 };
 
 function saveKey(variantId: VariantId): string {
@@ -60,6 +62,9 @@ export function loadHubPreferences(): HubPreferences {
 export function saveHubPreferences(prefs: HubPreferences): void {
   try {
     localStorage.setItem(HUB_PREFS_KEY, JSON.stringify({ ...prefs, version: SCHEMA_VERSION }));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('uno-hub-prefs-changed'));
+    }
   } catch {
     // ignore quota error
   }
